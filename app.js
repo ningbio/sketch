@@ -55,7 +55,7 @@ function toSkColor(color4f) {
 }
 
 async function loadCanvasKit() {
-	const candidate = { js: 'canvaskit/bin/canvaskit.js', locate: (file) => `canvaskit/bin/${file}` };
+	const candidate = { js: '/canvaskit/canvaskit.js', locate: (file) => `/canvaskit/${file}` };
 	await new Promise((resolve, reject) => {
 		const script = document.createElement('script');
 		script.src = candidate.js;

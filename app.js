@@ -92,6 +92,24 @@ async function loadCanvasKit() {
 	});
 }
 
+function drawFilledLine(canvas, x0, y0, x1, y1, width, paint) {
+	const dx = x1 - x0;
+	const dy = y1 - y0;
+	const len = Math.hypot(dx, dy) || 0.0001;
+	const nx = -dy / len; // normal x
+	const ny = dx / len;  // normal y
+	const hw = (width || 1) / 2;
+	// Build a quad (rectangle) around the segment
+	const path = new CanvasKit.Path();
+	path.moveTo(x0 + nx * hw, y0 + ny * hw);
+	path.lineTo(x0 - nx * hw, y0 - ny * hw);
+	path.lineTo(x1 - nx * hw, y1 - ny * hw);
+	path.lineTo(x1 + nx * hw, y1 + ny * hw);
+	path.close();
+	canvas.drawPath(path, paint);
+	path.delete();
+}
+
 function setCanvasSize(canvas) {
 	const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
 	const rect = dom.stage.getBoundingClientRect();
@@ -128,8 +146,13 @@ function clearOverlay() {
 
 // Tool switching UI
 function updateToolVisibility() {
-	dom.penProps.hidden = state.currentTool !== 'pen' && state.currentTool !== 'eraser';
-	dom.shapeProps.hidden = state.currentTool !== 'shape';
+	const showPen = state.currentTool === 'pen' || state.currentTool === 'eraser';
+	const showShape = state.currentTool === 'shape';
+	// Set both hidden attribute and inline display to avoid any CSS conflicts
+	dom.penProps.hidden = !showPen;
+	dom.penProps.style.display = showPen ? '' : 'none';
+	dom.shapeProps.hidden = !showShape;
+	dom.shapeProps.style.display = showShape ? '' : 'none';
 	dom.toolButtons.forEach((btn) => {
 		btn.setAttribute('aria-pressed', String(btn.dataset.tool === state.currentTool));
 	});
@@ -290,18 +313,17 @@ function drawToolStroke(p, pointerId) {
 		skSurface.flush();
 		gesture.last = p;
 	} else if (state.currentTool === 'shape') {
-		// draw preview on overlay
+		// draw filled preview on overlay
 		const c = overlaySurface.getCanvas();
 		c.clear(CanvasKit.TRANSPARENT);
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
-		paint.setColor(CanvasKit.Color4f(0, 0, 0, 1));
-		paint.setStyle(CanvasKit.PaintStyle.Stroke);
-		paint.setStrokeWidth(state.shape.strokeWidth);
+		paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const { x: x0, y: y0 } = gesture.start;
 		const { x: x1, y: y1 } = p;
 		if (state.shape.type === 'line') {
-			c.drawLine(x0, y0, x1, y1, paint);
+			drawFilledLine(c, x0, y0, x1, y1, state.shape.strokeWidth, paint);
 		} else if (state.shape.type === 'rect') {
 			const l = Math.min(x0, x1), r = Math.max(x0, x1);
 			const t = Math.min(y0, y1), b = Math.max(y0, y1);
@@ -331,17 +353,16 @@ function drawToolStroke(p, pointerId) {
 function finalizeToolGesture(p) {
 	if (!CanvasKit || !skSurface) return;
 	if (state.currentTool === 'shape') {
-		// commit preview to draw canvas
+		// commit filled shape to draw canvas
 		const canvas = skSurface.getCanvas();
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
 		paint.setColor(CanvasKit.Color(0, 0, 0, 255));
-		paint.setStyle(CanvasKit.PaintStyle.Stroke);
-		paint.setStrokeWidth(state.shape.strokeWidth);
+		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const { x: x0, y: y0 } = gesture.start;
 		const { x: x1, y: y1 } = p;
 		if (state.shape.type === 'line') {
-			canvas.drawLine(x0, y0, x1, y1, paint);
+			drawFilledLine(canvas, x0, y0, x1, y1, state.shape.strokeWidth, paint);
 		} else if (state.shape.type === 'rect') {
 			const l = Math.min(x0, x1), r = Math.max(x0, x1);
 			const t = Math.min(y0, y1), b = Math.max(y0, y1);

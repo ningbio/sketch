@@ -33,6 +33,9 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial
 .tool-props { display: flex; gap: 12px; align-items: center; }
 .tool-props label { display: inline-flex; align-items: center; gap: 8px; }
 .tool-props input[type="range"] { width: 160px; }
+.tool-props, .tool-props label, .tool-props span, .tool-props select { color: #111111; }
+.tool-props select { background-color: #ffffff; }
+.tool-props select option { color: #111111; background-color: #ffffff; }
 
 .stage { position: relative; flex: 1; overflow: hidden; touch-action: none; background: #f6f7fb; }
 #draw-canvas, #overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

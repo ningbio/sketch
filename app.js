@@ -56,22 +56,13 @@ function toSkColor(color4f) {
 
 async function loadCanvasKit() {
 	const candidate = { js: '/canvaskit/canvaskit.js', locate: (file) => `/canvaskit/${file}` };
-	try {
-		await loadFrom(candidate);
-	} catch (e) {
-		console.error('CanvasKit load failed:', candidate.js, e);
-		throw e;
-	}
-}
-
-function loadFrom(candidate) {
-	return new Promise((resolve, reject) => {
+	await new Promise((resolve, reject) => {
 		const script = document.createElement('script');
 		script.src = candidate.js;
 		script.async = true;
 		// classic script load; avoid crossorigin to prevent CORS block on some CDNs
 		script.type = 'text/javascript';
-		const onError = (e) => {
+		const onError = () => {
 			cleanup();
 			reject(new Error('Script load error'));
 		};

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sketch — CanvasKit Raster App</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="toolbar" role="toolbar" aria-label="Drawing tools">
+      <div class="tool-group">
+        <button class="tool-btn" data-tool="pen" aria-pressed="true">Pen</button>
+        <button class="tool-btn" data-tool="shape">Shape</button>
+        <button class="tool-btn" data-tool="eraser">Eraser</button>
+        <button class="tool-btn" data-tool="select">Select</button>
+        <button class="tool-btn" data-tool="transform">Transform</button>
+      </div>
+      <div class="tool-props" id="pen-props" aria-live="polite">
+        <label>
+          Brush shape
+          <select id="brush-shape">
+            <option value="ellipse">Ellipse</option>
+            <option value="rect">Rect</option>
+          </select>
+        </label>
+        <label>
+          Stroke width
+          <input id="stroke-width" type="range" min="1" max="200" value="24">
+          <span id="stroke-width-val">24</span>
+        </label>
+        <label>
+          Rotate angle
+          <input id="rotate-angle" type="range" min="0" max="360" value="0">
+          <span id="rotate-angle-val">0°</span>
+        </label>
+        <label>
+          Opacity
+          <input id="opacity" type="range" min="0" max="100" value="100">
+          <span id="opacity-val">100%</span>
+        </label>
+      </div>
+      <div class="tool-props" id="shape-props" hidden>
+        <label>
+          Shape type
+          <select id="shape-type">
+            <option value="line">Line</option>
+            <option value="rect">Rect</option>
+            <option value="ellipse">Ellipse</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <main id="stage" class="stage" role="application" aria-label="Canvas stage">
+      <!-- Two stacked canvases: draw (bottom) and overlay (top) -->
+      <canvas id="draw-canvas"></canvas>
+      <canvas id="overlay-canvas"></canvas>
+    </main>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+  <noscript>This app requires JavaScript.</noscript>
+</body>
+<!--
+  Keyboard shortcuts (desktop):
+  1: Pen, 2: Shape, 3: Eraser, 4: Select, 5: Transform
+  [ / ]: Decrease/Increase stroke width
+  , / . : Rotate brush angle -/+ 5°
+-->
+</html>
+

@@ -27,6 +27,14 @@ const state = {
     selection: null, // { path: SkPath, points: [{x,y}], bounds: {x,y,w,h}, image: SkImage, offset:{x,y}, transform:{tx,ty,scale,rotation} }
 };
 
+// path smoothing
+let invMass = 1.0;
+// let damp = 0.05; // tweak this for level of smoothness
+let nExtra = 4; // pre-smoothing by resampling more points
+let curPos = [0, 0];
+let curVel = [0, 0];
+let curAcc = [0, 0];
+
 const dom = {
     stage: document.getElementById('stage'),
     drawCanvas: document.getElementById('draw-canvas'),
@@ -63,6 +71,16 @@ if (shapeStrokeWidthEl && shapeStrokeWidthValEl) {
     const g = document.getElementById('shape-stroke-width-group');
     if (g) g.hidden = state.shape.type !== 'line';
 })();
+
+// Smoothness binding (controls damp)
+const smoothnessEl = document.getElementById('smoothness');
+const smoothnessValEl = document.getElementById('smoothness-val');
+if (smoothnessEl && smoothnessValEl) {
+    smoothnessEl.addEventListener('input', () => {
+        const v = Math.max(0.01, Math.min(0.1, Number(smoothnessEl.value)));
+        smoothnessValEl.textContent = v.toFixed(3);
+    });
+}
 
 // Load CanvasKit WASM
 let CanvasKit = null;
@@ -435,15 +453,6 @@ window.addEventListener('keydown', e => {
 // Tool gesture helpers
 let gesture = null; // stores per-gesture temp data
 
-// smoothing states
-let invMass = 1.0;
-let damp = 0.05; // tweak this for level of smoothness
-let nExtra = 4; // pre-smoothing by resampling more points
-let curPos = [0, 0];
-let curVel = [0, 0];
-let curAcc = [0, 0];
-let curPath = []; // current path points being drawn
-
 function beginToolGesture(p, pointerId) {
     if (!CanvasKit || !skSurface) return;
     gesture = { start: p, last: p, pointerId, points: [p] };
@@ -467,7 +476,6 @@ function beginToolGesture(p, pointerId) {
         curPos = [p.x, p.y];
         curVel = [0, 0];
         curAcc = [0, 0];
-        curPath = [{ x: p.x, y: p.y }];
 
         stampBrushBlit(c, paint, p.x, p.y, state.currentTool === 'eraser');
         paint.delete();
@@ -492,6 +500,7 @@ function drawToolStroke(p) {
         const canvas = skSurface.getCanvas();
 
         // smoothing
+        const damp = Number(smoothnessValEl.textContent);
         let target = [p.x, p.y];
         let totalAcc = [(target[0] - curPos[0]) * invMass, (target[1] - curPos[1]) * invMass];
         let targetVel = [(curVel[0] + totalAcc[0]) * damp, (curVel[1] + totalAcc[1]) * damp];
@@ -613,9 +622,6 @@ function finalizeToolGesture(p) {
     } else if (state.currentTool === 'select') {
         finalizeLassoSelection(gesture.points);
     }
-
-    // clear current path
-    curPath = [];
 
     gesture = null;
 }

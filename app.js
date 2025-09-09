@@ -338,6 +338,8 @@ function beginToolGesture(p, pointerId) {
 		stampBrush(c, paint, p.x, p.y, state.currentTool === 'eraser');
 		paint.delete();
 		skSurface.flush();
+		// Hide any hover outline while drawing
+		clearOverlay();
 	}
 }
 
@@ -345,6 +347,8 @@ function drawToolStroke(p) {
 	if (!CanvasKit || !skSurface) return;
 	if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
 		// Stamp oriented brush between last and p
+		// Ensure hover outline is hidden during drawing
+		clearOverlay();
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
 		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.Clear : CanvasKit.BlendMode.SrcOver);

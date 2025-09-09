@@ -48,6 +48,22 @@ const dom = {
 	brushHeightVal: document.getElementById('brush-height-val'),
 };
 
+// Add after DOM bindings
+const shapeStrokeWidthEl = document.getElementById('shape-stroke-width');
+const shapeStrokeWidthValEl = document.getElementById('shape-stroke-width-val');
+if (shapeStrokeWidthEl && shapeStrokeWidthValEl) {
+	shapeStrokeWidthEl.addEventListener('input', () => {
+		const v = Number(shapeStrokeWidthEl.value || '2');
+		state.shape.strokeWidth = v;
+		shapeStrokeWidthValEl.textContent = String(v);
+	});
+}
+// Initialize visibility on load
+(function initShapeControls() {
+	const g = document.getElementById('shape-stroke-width-group');
+	if (g) g.hidden = state.shape.type !== 'line';
+})();
+
 // Load CanvasKit WASM
 let CanvasKit = null;
 let skSurface = null; // draw canvas surface
@@ -194,6 +210,13 @@ function updateToolVisibility() {
 	dom.penProps.style.display = showPen ? '' : 'none';
 	dom.shapeProps.hidden = !showShape;
 	dom.shapeProps.style.display = showShape ? '' : 'none';
+	// Only show shape stroke width when shape type is line and Shape tool active
+	const sg = document.getElementById('shape-stroke-width-group');
+	if (sg) {
+		const visible = showShape && state.shape.type === 'line';
+		sg.hidden = !visible;
+		sg.style.display = visible ? '' : 'none';
+	}
 	dom.toolButtons.forEach((btn) => {
 		btn.setAttribute('aria-pressed', String(btn.dataset.tool === state.currentTool));
 	});
@@ -227,6 +250,13 @@ dom.rotateAngle.addEventListener('input', () => {
 });
 dom.shapeType.addEventListener('change', () => {
 	state.shape.type = dom.shapeType.value;
+	const g = document.getElementById('shape-stroke-width-group');
+	if (g) {
+		const visible = state.shape.type === 'line' && state.currentTool === 'shape';
+		g.hidden = !visible;
+		g.style.display = visible ? '' : 'none';
+	}
+	updateToolVisibility();
 });
 
 // Opacity binding (0-100%)

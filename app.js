@@ -54,6 +54,8 @@ let skSurface = null; // draw canvas surface
 let overlaySurface = null; // overlay surface for previews and selection highlights
 let skGrCtx = null; // GPU GrContext for draw canvas
 let overlayGrCtx = null; // GPU GrContext for overlay canvas
+let brushImage = null; // cached SkImage for pen brush
+let eraserImage = null; // cached SkImage for eraser brush
 
 function toSkColor(color4f) {
 	// color4f is [r,g,b,a] in 0..1, convert to 0..255 ints
@@ -209,16 +211,19 @@ dom.toolButtons.forEach((btn) => {
 dom.brushShape.addEventListener('change', () => {
 	state.pen.brushShape = dom.brushShape.value;
 	state.eraser.brushShape = dom.brushShape.value;
+	refreshBrushImages();
 });
 dom.strokeWidth.addEventListener('input', () => {
 	const v = Number(dom.strokeWidth.value);
 	state.pen.strokeWidth = v; state.eraser.strokeWidth = v;
 	dom.strokeWidthVal.textContent = String(v);
+	refreshBrushImages();
 });
 dom.rotateAngle.addEventListener('input', () => {
 	const v = Number(dom.rotateAngle.value);
 	state.pen.rotateAngle = v; state.eraser.rotateAngle = v;
 	dom.rotateAngleVal.textContent = v + '°';
+	refreshBrushImages();
 });
 dom.shapeType.addEventListener('change', () => {
 	state.shape.type = dom.shapeType.value;
@@ -238,12 +243,14 @@ dom.brushWidth.addEventListener('input', () => {
 	state.pen.brushWidth = v / 100;
 	state.eraser.brushWidth = v / 100;
 	dom.brushWidthVal.textContent = `${v}%`;
+	refreshBrushImages();
 });
 dom.brushHeight.addEventListener('input', () => {
 	const v = Math.max(10, Math.min(400, Number(dom.brushHeight.value)));
 	state.pen.brushHeight = v / 100;
 	state.eraser.brushHeight = v / 100;
 	dom.brushHeightVal.textContent = `${v}%`;
+	refreshBrushImages();
 });
 
 // Pointer handling (mouse + touch unified)
@@ -331,11 +338,12 @@ function beginToolGesture(p, pointerId) {
 		// Stamp initial brush immediately on down
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
-		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.Clear : CanvasKit.BlendMode.SrcOver);
-		paint.setColor(CanvasKit.Color4f(0.0, 0.0, 0.0, state.pen.opacity ?? 1));
+		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.DstOut : CanvasKit.BlendMode.SrcOver);
+		paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+		paint.setAlphaf(state.pen.opacity);
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const c = skSurface.getCanvas();
-		stampBrush(c, paint, p.x, p.y, state.currentTool === 'eraser');
+		stampBrushBlit(c, paint, p.x, p.y, state.currentTool === 'eraser');
 		paint.delete();
 		skSurface.flush();
 		// Hide any hover outline while drawing
@@ -351,8 +359,9 @@ function drawToolStroke(p) {
 		clearOverlay();
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
-		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.Clear : CanvasKit.BlendMode.SrcOver);
-		paint.setColor(CanvasKit.Color4f(0.0, 0.0, 0.0, state.pen.opacity));
+		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.DstOut : CanvasKit.BlendMode.SrcOver);
+		paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+		paint.setAlphaf(state.pen.opacity);
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const canvas = skSurface.getCanvas();
 		const dx = p.x - gesture.last.x; const dy = p.y - gesture.last.y;
@@ -366,7 +375,7 @@ function drawToolStroke(p) {
 			const t = i / steps;
 			const x = gesture.last.x + dx * t;
 			const y = gesture.last.y + dy * t;
-			stampBrush(canvas, paint, x, y, state.currentTool === 'eraser');
+			stampBrushBlit(canvas, paint, x, y, state.currentTool === 'eraser');
 		}
 		paint.delete();
 		skSurface.flush();
@@ -440,7 +449,7 @@ function finalizeToolGesture(p) {
 	gesture = null;
 }
 
-function stampBrush(canvas, paint, x, y, isErasing) {
+function stampBrush(canvas, paint, x, y) {
 	const size = state.pen.strokeWidth;
 	const hw = size / 2;
 	const angleDeg = (state.pen.rotateAngle || 0);
@@ -455,6 +464,24 @@ function stampBrush(canvas, paint, x, y, isErasing) {
 		canvas.drawRect(CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2), paint);
 	}
 	canvas.restoreToCount(save);
+}
+
+function stampBrushBlit(canvas, paint, x, y, isErasing) {
+	const img = isErasing ? (eraserImage || brushImage) : brushImage;
+	if (img) {
+		const w = img.width();
+		const h = img.height();
+		const save = canvas.save();
+		const angleDeg = (state.pen.rotateAngle || 0);
+		canvas.translate(x, y);
+		canvas.rotate(angleDeg, 0, 0);
+		canvas.translate(-w / 2, -h / 2);
+		canvas.drawImage(img, 0, 0, paint);
+		canvas.restoreToCount(save);
+		return;
+	}
+	// Fallback to vector stamp
+	stampBrush(canvas, paint, x, y);
 }
 
 function drawBrushOutline(x, y) {
@@ -488,6 +515,7 @@ async function main() {
 	await loadCanvasKit();
 	resizeSurfaces();
 	updateToolVisibility();
+	refreshBrushImages();
 	window.addEventListener('resize', resizeSurfaces, { passive: true });
 }
 
@@ -696,6 +724,38 @@ function disposeSelection() {
 	try { state.selection.path.delete(); } catch {}
 	state.selection = null;
 	gesture = null;
+}
+
+function refreshBrushImages() {
+	if (!CanvasKit) return;
+	try { if (brushImage) brushImage.delete(); } catch {}
+	try { if (eraserImage) eraserImage.delete(); } catch {}
+	brushImage = null; eraserImage = null;
+	const base = state.pen.strokeWidth / 2;
+	const rx = Math.max(0.5, base * (state.pen.brushWidth || 1));
+	const ry = Math.max(0.5, base * (state.pen.brushHeight || 1));
+	const w = Math.max(1, Math.ceil(rx * 2));
+	const h = Math.max(1, Math.ceil(ry * 2));
+	const surf = CanvasKit.MakeSurface(w, h);
+	if (!surf) return;
+	const c = surf.getCanvas();
+	c.clear(CanvasKit.TRANSPARENT);
+	const p = new CanvasKit.Paint();
+	p.setAntiAlias(true);
+	p.setStyle(CanvasKit.PaintStyle.Fill);
+	p.setColor(CanvasKit.Color(0, 0, 0, 255));
+	const save = c.save();
+	c.translate(w / 2, h / 2);
+	if (state.pen.brushShape === 'ellipse') {
+		c.drawOval(CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2), p);
+	} else {
+		c.drawRect(CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2), p);
+	}
+	c.restoreToCount(save);
+	brushImage = surf.makeImageSnapshot();
+	eraserImage = brushImage;
+	p.delete();
+	surf.dispose();
 }
 
 

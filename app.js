@@ -518,11 +518,18 @@ function drawBrushOutline(x, y) {
 	if (!overlaySurface) return;
 	const c = overlaySurface.getCanvas();
 	c.clear(CanvasKit.TRANSPARENT);
-	const paint = new CanvasKit.Paint();
-	paint.setAntiAlias(true);
-	paint.setStyle(CanvasKit.PaintStyle.Stroke);
-	paint.setStrokeWidth(1);
-	paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+	// Outer white stroke
+	const paintOuter = new CanvasKit.Paint();
+	paintOuter.setAntiAlias(true);
+	paintOuter.setStyle(CanvasKit.PaintStyle.Stroke);
+	paintOuter.setStrokeWidth(2);
+	paintOuter.setColor(CanvasKit.Color(255, 255, 255, 255));
+	// Inner black stroke
+	const paintInner = new CanvasKit.Paint();
+	paintInner.setAntiAlias(true);
+	paintInner.setStyle(CanvasKit.PaintStyle.Stroke);
+	paintInner.setStrokeWidth(1);
+	paintInner.setColor(CanvasKit.Color(0, 0, 0, 255));
 	const size = state.pen.strokeWidth;
 	const hw = size / 2;
 	const rx = hw * (state.pen.brushWidth || 1);
@@ -532,12 +539,17 @@ function drawBrushOutline(x, y) {
 	c.translate(x, y);
 	c.rotate(angleDeg, 0, 0);
 	if (state.pen.brushShape === 'ellipse') {
-		c.drawOval(CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2), paint);
+		const rect = CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2);
+		c.drawOval(rect, paintOuter);
+		c.drawOval(rect, paintInner);
 	} else {
-		c.drawRect(CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2), paint);
+		const rect = CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2);
+		c.drawRect(rect, paintOuter);
+		c.drawRect(rect, paintInner);
 	}
 	c.restoreToCount(save);
-	paint.delete();
+	paintOuter.delete();
+	paintInner.delete();
 	overlaySurface.flush();
 }
 

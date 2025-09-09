@@ -226,9 +226,9 @@ dom.shapeType.addEventListener('change', () => {
 
 // Opacity binding (0-100%)
 dom.opacity.addEventListener('input', () => {
-	const v = Math.max(0, Math.min(100, Number(dom.opacity.value)));
-	state.pen.opacity = v / 100;
-	state.eraser.opacity = v / 100;
+	const v = Math.max(10, Math.min(100, Number(dom.opacity.value)));
+	state.pen.opacity = v / 1000; // compensate tight stamping overlapping
+	state.eraser.opacity = v / 1000;
 	dom.opacityVal.textContent = `${v}%`;
 });
 
@@ -332,7 +332,7 @@ function beginToolGesture(p, pointerId) {
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
 		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.Clear : CanvasKit.BlendMode.SrcOver);
-		paint.setColor(CanvasKit.Color(0, 0, 0, Math.round((state.pen.opacity ?? 1) * 255)));
+		paint.setColor(CanvasKit.Color4f(0.0, 0.0, 0.0, state.pen.opacity ?? 1));
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const c = skSurface.getCanvas();
 		stampBrush(c, paint, p.x, p.y, state.currentTool === 'eraser');
@@ -348,7 +348,7 @@ function drawToolStroke(p) {
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
 		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.Clear : CanvasKit.BlendMode.SrcOver);
-		paint.setColor(CanvasKit.Color(0, 0, 0, Math.round((state.pen.opacity ?? 1) * 255)));
+		paint.setColor(CanvasKit.Color4f(0.0, 0.0, 0.0, state.pen.opacity));
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const canvas = skSurface.getCanvas();
 		const dx = p.x - gesture.last.x; const dy = p.y - gesture.last.y;
@@ -356,7 +356,7 @@ function drawToolStroke(p) {
 		const base = state.pen.strokeWidth / 2;
 		const rx = base * (state.pen.brushWidth || 1);
 		const ry = base * (state.pen.brushHeight || 1);
-		const step = Math.min(0.5, Math.min(rx, ry));
+		const step = Math.min(0.2, Math.min(rx, ry));
 		const steps = Math.ceil(dist / step);
 		for (let i = 1; i <= steps; i++) {
 			const t = i / steps;
@@ -373,7 +373,7 @@ function drawToolStroke(p) {
 		c.clear(CanvasKit.TRANSPARENT);
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
-		paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+		paint.setColor(CanvasKit.Color(0, 0, 0, 1));
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const { x: x0, y: y0 } = gesture.start;
 		const { x: x1, y: y1 } = p;
@@ -412,7 +412,7 @@ function finalizeToolGesture(p) {
 		const canvas = skSurface.getCanvas();
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
-		paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+		paint.setColor(CanvasKit.Color(0, 0, 0, 1));
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const { x: x0, y: y0 } = gesture.start;
 		const { x: x1, y: y1 } = p;

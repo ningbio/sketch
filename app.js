@@ -367,6 +367,15 @@ window.addEventListener('keydown', (e) => {
 // Tool gesture helpers
 let gesture = null; // stores per-gesture temp data
 
+// smoothing states
+let invMass = 1.0;
+let damp = 0.05; // tweak this for level of smoothness
+let nExtra = 4;  // pre-smoothing by resampling more points
+let curPos = [0, 0];
+let curVel = [0, 0];
+let curAcc = [0, 0];
+let curPath = []; // current path points being drawn
+
 function beginToolGesture(p, pointerId) {
 	if (!CanvasKit || !skSurface) return;
 	gesture = { start: p, last: p, pointerId, points: [p] };
@@ -385,6 +394,13 @@ function beginToolGesture(p, pointerId) {
 		paint.setAlphaf(state.pen.opacity);
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const c = skSurface.getCanvas();
+
+        // init smoothing state
+		curPos = [p.x, p.y];
+		curVel = [0, 0];
+		curAcc = [0, 0];
+		curPath = [{x: p.x, y: p.y}];
+
 		stampBrushBlit(c, paint, p.x, p.y, state.currentTool === 'eraser');
 		paint.delete();
 		skSurface.flush();
@@ -406,19 +422,50 @@ function drawToolStroke(p) {
 		paint.setAlphaf(state.pen.opacity);
 		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const canvas = skSurface.getCanvas();
-		const dx = p.x - gesture.last.x; const dy = p.y - gesture.last.y;
-		const dist = Math.hypot(dx, dy) || 0.0001;
-		const base = state.pen.strokeWidth / 2;
-		const rx = base * (state.pen.brushWidth || 1);
-		const ry = base * (state.pen.brushHeight || 1);
-		const step = Math.min(0.2, Math.min(rx, ry));
-		const steps = Math.ceil(dist / step);
-		for (let i = 1; i <= steps; i++) {
-			const t = i / steps;
-			const x = gesture.last.x + dx * t;
-			const y = gesture.last.y + dy * t;
-			stampBrushBlit(canvas, paint, x, y, state.currentTool === 'eraser');
-		}
+
+        // smoothing
+        let target = [p.x, p.y];
+        let totalAcc = [(target[0] - curPos[0]) * invMass, (target[1] - curPos[1]) * invMass];
+        let targetVel = [(curVel[0] + totalAcc[0]) * damp, (curVel[1] + totalAcc[1]) * damp];
+    
+        // amortized acc
+        let deltaAcc = [0, 0];
+        for (let k = 0; k < 2; k++) {
+            deltaAcc[k] = (targetVel[k] - curVel[k] - nExtra * curAcc[k]) * 2 / (nExtra * (nExtra + 1));
+        }
+        
+        // add extra points using forward Euler integrator (not unconditionally stable)
+        const points = [{x: curPos[0], y: curPos[1]}];
+        for (let i = 0; i < nExtra; i++) {
+            for (let k = 0; k < 2; k++) {
+                curAcc[k] += deltaAcc[k];
+                curVel[k] += curAcc[k];
+                curPos[k] += curVel[k];
+            }
+            points.push({ x: curPos[0], y: curPos[1] });
+        }
+    
+        // now stamping points segment by segment
+        for (let i = 0; i < points.length - 1; i++) {
+            const p0 = points[i];
+            const p1 = points[i + 1];
+
+            const dx = p1.x - p0.x;
+            const dy = p1.y - p0.y;
+            const dist = Math.hypot(dx, dy) || 0.0001;
+            const base = state.pen.strokeWidth / 2;
+            const rx = base * (state.pen.brushWidth || 1);
+            const ry = base * (state.pen.brushHeight || 1);
+            const step = Math.min(0.2, Math.min(rx, ry));
+            const steps = Math.ceil(dist / step);
+            for (let k = 1; k <= steps; k++) {
+                const t = k / steps;
+                const x = p0.x + dx * t;
+                const y = p0.y + dy * t;
+                stampBrushBlit(canvas, paint, x, y, state.currentTool === 'eraser');
+            }
+        }
+
 		paint.delete();
 		skSurface.flush();
 		gesture.last = p;
@@ -488,6 +535,10 @@ function finalizeToolGesture(p) {
 	} else if (state.currentTool === 'select') {
 		finalizeLassoSelection(gesture.points);
 	}
+
+    // clear current path 
+    curPath = [];
+
 	gesture = null;
 }
 

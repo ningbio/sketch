@@ -8,12 +8,16 @@ const state = {
 		rotateAngle: 0,
 		color: [0, 0, 0, 1],
 		opacity: 1,
+		brushWidth: 1.0, // scale factor relative to strokeWidth (1=100%)
+		brushHeight: 1.0,
 	},
 	eraser: {
 		brushShape: 'ellipse',
 		strokeWidth: 24,
 		rotateAngle: 0,
 		opacity: 1,
+		brushWidth: 1.0,
+		brushHeight: 1.0,
 	},
 	shape: {
 		type: 'line', // 'line' | 'rect' | 'ellipse'
@@ -38,12 +42,18 @@ const dom = {
 	shapeType: document.getElementById('shape-type'),
 	opacity: document.getElementById('opacity'),
 	opacityVal: document.getElementById('opacity-val'),
+	brushWidth: document.getElementById('brush-width'),
+	brushWidthVal: document.getElementById('brush-width-val'),
+	brushHeight: document.getElementById('brush-height'),
+	brushHeightVal: document.getElementById('brush-height-val'),
 };
 
 // Load CanvasKit WASM
 let CanvasKit = null;
 let skSurface = null; // draw canvas surface
 let overlaySurface = null; // overlay surface for previews and selection highlights
+let skGrCtx = null; // GPU GrContext for draw canvas
+let overlayGrCtx = null; // GPU GrContext for overlay canvas
 
 function toSkColor(color4f) {
 	// color4f is [r,g,b,a] in 0..1, convert to 0..255 ints
@@ -125,16 +135,45 @@ function resizeSurfaces() {
 	setCanvasSize(dom.drawCanvas);
 	setCanvasSize(dom.overlayCanvas);
 	if (!CanvasKit) return;
-	if (skSurface) skSurface.dispose();
-	if (overlaySurface) overlaySurface.dispose();
-	// Try GPU surface, fallback to software surface if needed
-	skSurface = CanvasKit.MakeCanvasSurface(dom.drawCanvas) || CanvasKit.MakeSWCanvasSurface(dom.drawCanvas);
-	overlaySurface = CanvasKit.MakeCanvasSurface(dom.overlayCanvas) || CanvasKit.MakeSWCanvasSurface(dom.overlayCanvas);
-	if (!skSurface || !overlaySurface) {
-		console.error('Failed to create CanvasKit surface(s).');
+	// Dispose old GPU surfaces/contexts
+	if (skSurface) { try { skSurface.dispose(); } catch {} skSurface = null; }
+	if (overlaySurface) { try { overlaySurface.dispose(); } catch {} overlaySurface = null; }
+	if (skGrCtx && skGrCtx.delete) { try { skGrCtx.delete(); } catch {} skGrCtx = null; }
+	if (overlayGrCtx && overlayGrCtx.delete) { try { overlayGrCtx.delete(); } catch {} overlayGrCtx = null; }
+	// Create GPU GL surfaces with preserveDrawingBuffer so stamps persist
+	const main = makeGLSurface(dom.drawCanvas);
+	const over = makeGLSurface(dom.overlayCanvas);
+	if (!main || !over) {
+		console.error('Failed to create GPU surfaces.');
 		return;
 	}
+	skSurface = main.surface; skGrCtx = main.grCtx;
+	overlaySurface = over.surface; overlayGrCtx = over.grCtx;
 	clearOverlay();
+}
+
+function makeGLSurface(canvas) {
+	try {
+		const attrs = {
+			antialias: true,
+			alpha: true,
+			depth: false,
+			stencil: true,
+			preserveDrawingBuffer: true,
+			premultipliedAlpha: true,
+			desynchronized: false,
+		};
+		const gl = CanvasKit.GetWebGLContext(canvas, attrs);
+		if (!gl) return null;
+		const grCtx = CanvasKit.MakeGrContext(gl);
+		if (!grCtx) return null;
+		const surface = CanvasKit.MakeOnScreenGLSurface(grCtx, canvas.width, canvas.height, CanvasKit.ColorSpace.SRGB);
+		if (!surface) { try { grCtx.delete(); } catch {} return null; }
+		return { surface, grCtx };
+	} catch (e) {
+		console.error('makeGLSurface error', e);
+		return null;
+	}
 }
 
 function clearOverlay() {
@@ -193,11 +232,26 @@ dom.opacity.addEventListener('input', () => {
 	dom.opacityVal.textContent = `${v}%`;
 });
 
+// Brush width/height scaling (10% - 400%)
+dom.brushWidth.addEventListener('input', () => {
+	const v = Math.max(10, Math.min(400, Number(dom.brushWidth.value)));
+	state.pen.brushWidth = v / 100;
+	state.eraser.brushWidth = v / 100;
+	dom.brushWidthVal.textContent = `${v}%`;
+});
+dom.brushHeight.addEventListener('input', () => {
+	const v = Math.max(10, Math.min(400, Number(dom.brushHeight.value)));
+	state.pen.brushHeight = v / 100;
+	state.eraser.brushHeight = v / 100;
+	dom.brushHeightVal.textContent = `${v}%`;
+});
+
 // Pointer handling (mouse + touch unified)
 let isPointerDown = false;
 let lastPoint = null;
 const activePointers = new Map(); // pointerId -> {x,y}
 
+// return point is in pixel space considering dpi from event
 function getStagePoint(evt) {
 	const rect = dom.stage.getBoundingClientRect();
 	const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
@@ -222,7 +276,7 @@ dom.stage.addEventListener('pointermove', (e) => {
 	const p = getStagePoint(e);
 	if (!isPointerDown) { previewMove(p); return; }
 	activePointers.set(e.pointerId, p);
-	drawToolStroke(p, e.pointerId);
+	drawToolStroke(p);
 	lastPoint = p;
 	e.preventDefault();
 });
@@ -274,41 +328,42 @@ function beginToolGesture(p, pointerId) {
 		clearOverlay();
 		gesture.points = [p];
 	} else if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
-		// Initialize stroke path (Ink-style continuous stroke)
-		gesture.strokePath = new CanvasKit.Path();
-		gesture.strokePath.moveTo(p.x, p.y);
-		// Draw a tiny segment to place an initial dot
+		// Stamp initial brush immediately on down
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
 		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.Clear : CanvasKit.BlendMode.SrcOver);
 		paint.setColor(CanvasKit.Color(0, 0, 0, Math.round((state.pen.opacity ?? 1) * 255)));
-		paint.setStyle(CanvasKit.PaintStyle.Stroke);
-		paint.setStrokeWidth(state.pen.strokeWidth);
-		paint.setStrokeCap(CanvasKit.StrokeCap.Round);
-		paint.setStrokeJoin(CanvasKit.StrokeJoin.Round);
+		paint.setStyle(CanvasKit.PaintStyle.Fill);
 		const c = skSurface.getCanvas();
-		gesture.strokePath.lineTo(p.x + 0.01, p.y + 0.01);
-		c.drawPath(gesture.strokePath, paint);
+		stampBrush(c, paint, p.x, p.y, state.currentTool === 'eraser');
 		paint.delete();
 		skSurface.flush();
 	}
 }
 
-function drawToolStroke(p, pointerId) {
+function drawToolStroke(p) {
 	if (!CanvasKit || !skSurface) return;
 	if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
-		// Extend and draw the stroke path continuously
+		// Stamp oriented brush between last and p
 		const paint = new CanvasKit.Paint();
 		paint.setAntiAlias(true);
 		paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.Clear : CanvasKit.BlendMode.SrcOver);
 		paint.setColor(CanvasKit.Color(0, 0, 0, Math.round((state.pen.opacity ?? 1) * 255)));
-		paint.setStyle(CanvasKit.PaintStyle.Stroke);
-		paint.setStrokeWidth(state.pen.strokeWidth);
-		paint.setStrokeCap(CanvasKit.StrokeCap.Round);
-		paint.setStrokeJoin(CanvasKit.StrokeJoin.Round);
-		gesture.strokePath.lineTo(p.x, p.y);
-		const c = skSurface.getCanvas();
-		c.drawPath(gesture.strokePath, paint);
+		paint.setStyle(CanvasKit.PaintStyle.Fill);
+		const canvas = skSurface.getCanvas();
+		const dx = p.x - gesture.last.x; const dy = p.y - gesture.last.y;
+		const dist = Math.hypot(dx, dy) || 0.0001;
+		const base = state.pen.strokeWidth / 2;
+		const rx = base * (state.pen.brushWidth || 1);
+		const ry = base * (state.pen.brushHeight || 1);
+		const step = Math.min(0.5, Math.min(rx, ry));
+		const steps = Math.ceil(dist / step);
+		for (let i = 1; i <= steps; i++) {
+			const t = i / steps;
+			const x = gesture.last.x + dx * t;
+			const y = gesture.last.y + dy * t;
+			stampBrush(canvas, paint, x, y, state.currentTool === 'eraser');
+		}
 		paint.delete();
 		skSurface.flush();
 		gesture.last = p;
@@ -385,8 +440,8 @@ function stampBrush(canvas, paint, x, y, isErasing) {
 	const size = state.pen.strokeWidth;
 	const hw = size / 2;
 	const angleDeg = (state.pen.rotateAngle || 0);
-	const rx = hw;
-	const ry = hw * (state.pen.brushShape === 'ellipse' ? 0.7 : 1);
+	const rx = hw * (state.pen.brushWidth || 1);
+	const ry = hw * (state.pen.brushHeight || 1);
 	const save = canvas.save();
 	canvas.translate(x, y);
 	canvas.rotate(angleDeg, 0, 0);

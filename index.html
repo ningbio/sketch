@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Sketch — CanvasKit Raster App</title>
+  <title>CanvasKit Raster Test</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -26,22 +26,23 @@
           </select>
         </label>
         <label>
-          Brush width
-          <input id="brush-width" type="range" min="10" max="400" value="100">
-          <span id="brush-width-val">100%</span>
-        </label>
-        <label>
-          Brush height
-          <input id="brush-height" type="range" min="10" max="400" value="100">
-          <span id="brush-height-val">100%</span>
-        </label>
-        <label>
-          Stroke width
+          Size
           <input id="stroke-width" type="range" min="1" max="200" value="24">
           <span id="stroke-width-val">24</span>
         </label>
+
         <label>
-          Rotate angle
+          scaleX
+          <input id="brush-width" type="range" min="10" max="200" value="100">
+          <span id="brush-width-val">100%</span>
+        </label>
+        <label>
+          scaleY
+          <input id="brush-height" type="range" min="10" max="200" value="100">
+          <span id="brush-height-val">100%</span>
+        </label>
+        <label>
+          Angle
           <input id="rotate-angle" type="range" min="0" max="360" value="0">
           <span id="rotate-angle-val">0°</span>
         </label>
@@ -53,7 +54,7 @@
       </div>
       <div class="tool-props" id="shape-props" hidden>
         <label>
-          Shape type
+          Shape
           <select id="shape-type">
             <option value="line">Line</option>
             <option value="rect">Rect</option>

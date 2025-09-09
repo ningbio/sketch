@@ -31,7 +31,7 @@ const dom = {
 	stage: document.getElementById('stage'),
 	drawCanvas: document.getElementById('draw-canvas'),
 	overlayCanvas: document.getElementById('overlay-canvas'),
-	toolButtons: Array.from(document.querySelectorAll('.tool-btn')),
+	toolButtons: Array.from(document.querySelectorAll('.tool-btn[data-tool]')),
 	penProps: document.getElementById('pen-props'),
 	shapeProps: document.getElementById('shape-props'),
 	brushShape: document.getElementById('brush-shape'),
@@ -229,6 +229,18 @@ dom.toolButtons.forEach((btn) => {
 		clearOverlay();
 	});
 });
+
+// Clear canvas button
+const clearBtn = document.getElementById('clear-btn');
+if (clearBtn) {
+	clearBtn.addEventListener('click', () => {
+		if (!skSurface || !CanvasKit) return;
+		const c = skSurface.getCanvas();
+		c.clear(CanvasKit.TRANSPARENT);
+		skSurface.flush();
+		clearOverlay();
+	});
+}
 
 // Pen props bindings
 dom.brushShape.addEventListener('change', () => {

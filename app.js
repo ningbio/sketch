@@ -453,6 +453,33 @@ function stampBrush(canvas, paint, x, y, isErasing) {
 	canvas.restoreToCount(save);
 }
 
+function drawBrushOutline(x, y) {
+	if (!overlaySurface) return;
+	const c = overlaySurface.getCanvas();
+	c.clear(CanvasKit.TRANSPARENT);
+	const paint = new CanvasKit.Paint();
+	paint.setAntiAlias(true);
+	paint.setStyle(CanvasKit.PaintStyle.Stroke);
+	paint.setStrokeWidth(1);
+	paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+	const size = state.pen.strokeWidth;
+	const hw = size / 2;
+	const rx = hw * (state.pen.brushWidth || 1);
+	const ry = hw * (state.pen.brushHeight || 1);
+	const angleDeg = (state.pen.rotateAngle || 0);
+	const save = c.save();
+	c.translate(x, y);
+	c.rotate(angleDeg, 0, 0);
+	if (state.pen.brushShape === 'ellipse') {
+		c.drawOval(CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2), paint);
+	} else {
+		c.drawRect(CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2), paint);
+	}
+	c.restoreToCount(save);
+	paint.delete();
+	overlaySurface.flush();
+}
+
 async function main() {
 	await loadCanvasKit();
 	resizeSurfaces();
@@ -465,9 +492,13 @@ main().catch((e) => console.error(e));
 // ---------- Selection & Transform ----------
 
 function previewMove(p) {
-	// Optionally render brush outline or hover effects; keep minimal
-	if (state.currentTool === 'transform' && state.selection) {
+	if (!CanvasKit || !overlaySurface) return;
+	if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
+		drawBrushOutline(p.x, p.y);
+	} else if (state.currentTool === 'transform' && state.selection) {
 		drawSelectionOverlay(true);
+	} else {
+		clearOverlay();
 	}
 }
 

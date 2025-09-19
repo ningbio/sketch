@@ -31,11 +31,15 @@ const state = {
 let invMass = 1.0;
 // let damp = 0.05; // tweak this for level of smoothness
 const DEFAULT_N_EXTRA = 4; // default pre-sampling
-const PENCIL_N_EXTRA = 2; // Apple Pencil pre-sampling
+const PENCIL_N_EXTRA = 4; // Apple Pencil pre-sampling
 let nExtra = DEFAULT_N_EXTRA; // active pre-sampling value
 let curPos = [0, 0];
 let curVel = [0, 0];
 let curAcc = [0, 0];
+
+// Debug: draw raw input points before resampling as red crosses
+const DEBUG_DRAW_INPUT = true;
+let inputDebugPoints = [];
 
 const dom = {
     stage: document.getElementById('stage'),
@@ -489,6 +493,7 @@ dom.stage.addEventListener('pointerdown', e => {
     activePointers.set(e.pointerId, pw);
     screenPointers.set(e.pointerId, sp);
     lastPoint = pw;
+    if (DEBUG_DRAW_INPUT) inputDebugPoints = [];
     // Space/Alt/right/middle pan support
     if (e.button === 1 || e.button === 2 || e.altKey || e.metaKey || e.ctrlKey) {
         gesture = { ...(gesture || {}), panning: true, panLast: getStagePoint(e) };
@@ -569,6 +574,7 @@ dom.stage.addEventListener('pointermove', e => {
         if (e.pointerType === 'touch' && !(gesture && gesture.pinch && gesture.pinch.active) && !gesture) {
             beginToolGesture(pw, e.pointerId);
         }
+        if (DEBUG_DRAW_INPUT) inputDebugPoints.push({ x: sp.x, y: sp.y });
         drawToolStroke(pw);
         lastPoint = pw;
     }
@@ -718,6 +724,22 @@ function drawToolStroke(p) {
         // Stamp oriented brush between last and p
         // Ensure hover outline is hidden during drawing
         clearOverlay();
+        // Draw debug crosses for raw input points on overlay (screen space)
+        if (DEBUG_DRAW_INPUT && inputDebugPoints.length) {
+            const c = overlaySurface.getCanvas();
+            const crossPaint = new CanvasKit.Paint();
+            crossPaint.setAntiAlias(true);
+            crossPaint.setStyle(CanvasKit.PaintStyle.Stroke);
+            crossPaint.setColor(CanvasKit.Color(255, 0, 0, 255));
+            crossPaint.setStrokeWidth(1);
+            for (const pt of inputDebugPoints) {
+                const s = 4;
+                c.drawLine(pt.x - s, pt.y, pt.x + s, pt.y, crossPaint);
+                c.drawLine(pt.x, pt.y - s, pt.x, pt.y + s, crossPaint);
+            }
+            overlaySurface.flush();
+            crossPaint.delete();
+        }
         const paint = new CanvasKit.Paint();
         paint.setAntiAlias(true);
         paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.DstOut : CanvasKit.BlendMode.SrcOver);

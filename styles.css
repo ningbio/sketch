@@ -80,6 +80,17 @@ body {
     background-color: #ffffff;
 }
 
+/* Prevent accidental text selection on touch within toolbar */
+.toolbar,
+.tool-props,
+.tool-props label,
+.tool-props span {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
 /* Thinner sliders */
 .tool-props input[type='range'] {
     appearance: none;

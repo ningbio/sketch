@@ -447,6 +447,7 @@ let isPointerDown = false;
 let lastPoint = null;
 const activePointers = new Map(); // pointerId -> {x,y}
 let lastHoverScreenPoint = null; // screen-space cursor for overlay refresh on zoom
+const screenPointers = new Map(); // pointerId -> screen-space {x,y}
 
 // return point is in pixel space considering dpi from event
 function getStagePoint(evt) {
@@ -470,14 +471,35 @@ function getWorldPoint(evt) {
 
 dom.stage.addEventListener('pointerdown', e => {
     isPointerDown = true;
-    const pw = getWorldPoint(e);
+    const sp = getStagePoint(e);
+    const pw = toWorldPoint(sp);
     activePointers.set(e.pointerId, pw);
+    screenPointers.set(e.pointerId, sp);
     lastPoint = pw;
     // Space/Alt/right/middle pan support
     if (e.button === 1 || e.button === 2 || e.altKey || e.metaKey || e.ctrlKey) {
         gesture = { ...(gesture || {}), panning: true, panLast: getStagePoint(e) };
     } else {
         beginToolGesture(pw, e.pointerId);
+    }
+    // Start pinch-zoom if two touches active
+    if (e.pointerType === 'touch' && screenPointers.size === 2) {
+        const pts = Array.from(screenPointers.values());
+        const c0 = pts[0];
+        const c1 = pts[1];
+        const centroidStart = { x: (c0.x + c1.x) / 2, y: (c0.y + c1.y) / 2 };
+        const dx = c1.x - c0.x;
+        const dy = c1.y - c0.y;
+        const seedDist = Math.max(1, Math.hypot(dx, dy));
+        const worldAtCentroid = toWorldPoint(centroidStart);
+        gesture = gesture || {};
+        gesture.pinch = {
+            active: true,
+            start: { offsetX: view.offsetX, offsetY: view.offsetY, scale: view.scale },
+            seedDist,
+            centroidStart,
+            worldAtCentroid,
+        };
     }
     // Prevent scrolling on mobile
     dom.stage.setPointerCapture(e.pointerId);
@@ -492,6 +514,30 @@ dom.stage.addEventListener('pointermove', e => {
         previewMove(sp);
         return;
     }
+    // Update pointer maps
+    screenPointers.set(e.pointerId, sp);
+    activePointers.set(e.pointerId, pw);
+    // Handle pinch zoom if active with two touches
+    if (gesture && gesture.pinch && gesture.pinch.active && screenPointers.size >= 2) {
+        const pts = Array.from(screenPointers.values());
+        const c0 = pts[0];
+        const c1 = pts[1];
+        const centroidCur = { x: (c0.x + c1.x) / 2, y: (c0.y + c1.y) / 2 };
+        const dx = c1.x - c0.x;
+        const dy = c1.y - c0.y;
+        const curDist = Math.max(1, Math.hypot(dx, dy));
+        const ds = curDist / (gesture.pinch.seedDist || 1);
+        const newScale = Math.max(0.05, Math.min(8, (gesture.pinch.start.scale || view.scale) * ds));
+        view.scale = newScale;
+        // Keep the world point under the pinch centroid stable
+        view.offsetX = centroidCur.x - gesture.pinch.worldAtCentroid.x * newScale;
+        view.offsetY = centroidCur.y - gesture.pinch.worldAtCentroid.y * newScale;
+        present();
+        lastHoverScreenPoint = centroidCur;
+        if (lastHoverScreenPoint) previewMove(lastHoverScreenPoint);
+        e.preventDefault();
+        return;
+    }
     if (gesture && gesture.panning) {
         const last = gesture.panLast || sp;
         const dx = sp.x - last.x;
@@ -501,7 +547,6 @@ dom.stage.addEventListener('pointermove', e => {
         gesture.panLast = sp;
         present();
     } else {
-        activePointers.set(e.pointerId, pw);
         drawToolStroke(pw);
         lastPoint = pw;
     }
@@ -511,11 +556,16 @@ dom.stage.addEventListener('pointermove', e => {
 dom.stage.addEventListener('pointerup', e => {
     const p = getWorldPoint(e);
     activePointers.delete(e.pointerId);
+    screenPointers.delete(e.pointerId);
     isPointerDown = activePointers.size > 0;
     if (gesture && gesture.panning) {
         gesture.panning = false;
         gesture.panLast = null;
-    } else if (!isPointerDown) {
+    }
+    if (gesture && gesture.pinch && gesture.pinch.active && screenPointers.size < 2) {
+        gesture.pinch.active = false;
+    }
+    if (!isPointerDown && !(gesture && gesture.pinch && gesture.pinch.active)) {
         finalizeToolGesture(p);
     }
     dom.stage.releasePointerCapture(e.pointerId);
@@ -527,6 +577,8 @@ dom.stage.addEventListener('pointerleave', () => {
         isPointerDown = false;
         finalizeToolGesture(lastPoint);
         activePointers.clear();
+        screenPointers.clear();
+        if (gesture && gesture.pinch) gesture.pinch.active = false;
     }
 });
 

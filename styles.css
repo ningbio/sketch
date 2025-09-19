@@ -127,6 +127,10 @@ body {
     overflow: hidden;
     touch-action: none;
     background: #f6f7fb;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 #draw-canvas,
 #overlay-canvas {
@@ -135,6 +139,11 @@ body {
     width: 100%;
     height: 100%;
     display: block;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
 }
 #overlay-canvas {
     pointer-events: none;

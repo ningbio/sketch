@@ -5,18 +5,18 @@ const state = {
     pen: {
         brushShape: 'ellipse', // 'ellipse' | 'rect'
         strokeWidth: 24,
-        rotateAngle: 0,
+        rotateAngle: -45,
         color: [0, 0, 0, 1],
         opacity: 1,
-        brushWidth: 1.0, // scale factor relative to strokeWidth (1=100%)
+        brushWidth: 0.4, // scale factor relative to strokeWidth (1=100%)
         brushHeight: 1.0,
     },
     eraser: {
         brushShape: 'ellipse',
         strokeWidth: 24,
-        rotateAngle: 0,
+        rotateAngle: -45,
         opacity: 1,
-        brushWidth: 1.0,
+        brushWidth: 0.4,
         brushHeight: 1.0,
     },
     shape: {

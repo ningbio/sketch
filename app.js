@@ -471,6 +471,8 @@ function getWorldPoint(evt) {
 }
 
 dom.stage.addEventListener('pointerdown', e => {
+    // Prevent text selection or callouts on iOS when using Apple Pencil / touch
+    e.preventDefault();
     isPointerDown = true;
     lastPointerType = e.pointerType || lastPointerType;
     const sp = getStagePoint(e);
@@ -508,12 +510,12 @@ dom.stage.addEventListener('pointerdown', e => {
         gesture.start = null;
         return;
     }
-    // Prevent scrolling on mobile
+    // Prevent scrolling on mobile and capture pointer
     dom.stage.setPointerCapture(e.pointerId);
-    e.preventDefault();
 });
 
 dom.stage.addEventListener('pointermove', e => {
+    e.preventDefault();
     const sp = getStagePoint(e);
     const pw = toWorldPoint(sp);
     if (!isPointerDown) {
@@ -561,10 +563,10 @@ dom.stage.addEventListener('pointermove', e => {
         drawToolStroke(pw);
         lastPoint = pw;
     }
-    e.preventDefault();
 });
 
 dom.stage.addEventListener('pointerup', e => {
+    e.preventDefault();
     const p = getWorldPoint(e);
     activePointers.delete(e.pointerId);
     screenPointers.delete(e.pointerId);
@@ -580,7 +582,6 @@ dom.stage.addEventListener('pointerup', e => {
         finalizeToolGesture(p);
     }
     dom.stage.releasePointerCapture(e.pointerId);
-    e.preventDefault();
 });
 
 dom.stage.addEventListener('pointerleave', () => {

@@ -91,6 +91,16 @@ let overlayGrCtx = null; // GPU GrContext for overlay canvas
 let brushImage = null; // cached SkImage for pen brush
 let eraserImage = null; // cached SkImage for eraser brush
 
+// World rendering surface (content is drawn here in world coordinates)
+let worldSurface = null;
+let worldSize = { width: 0, height: 0 };
+// View transform (screen <- world)
+const view = {
+    offsetX: 0,
+    offsetY: 0,
+    scale: 1,
+};
+
 function toSkColor(color4f) {
     // color4f is [r,g,b,a] in 0..1, convert to 0..255 ints
     const r = Math.max(0, Math.min(255, Math.round((color4f[0] || 0) * 255)));
@@ -217,6 +227,27 @@ function resizeSurfaces() {
     overlaySurface = over.surface;
     overlayGrCtx = over.grCtx;
     clearOverlay();
+
+    // Create or resize world surface (preserve content)
+    const newW = dom.drawCanvas.width;
+    const newH = dom.drawCanvas.height;
+    if (!worldSurface) {
+        worldSurface = CanvasKit.MakeRenderTarget(skGrCtx, newW, newH);
+        worldSize = { width: newW, height: newH };
+    } else if (newW !== worldSize.width || newH !== worldSize.height) {
+        const oldImg = worldSurface.makeImageSnapshot();
+        const newWorld = CanvasKit.MakeRenderTarget(skGrCtx, newW, newH);
+        if (newWorld) {
+            const c = newWorld.getCanvas();
+            c.clear(CanvasKit.TRANSPARENT);
+            c.drawImage(oldImg, 0, 0);
+            worldSurface.dispose();
+            worldSurface = newWorld;
+            worldSize = { width: newW, height: newH };
+        }
+        oldImg.delete();
+    }
+    present();
 }
 
 function makeGLSurface(canvas) {
@@ -255,6 +286,47 @@ function clearOverlay() {
     overlaySurface.flush();
 }
 
+// Coordinate conversions
+function toWorldPoint(screenPoint) {
+    const s = Math.max(1e-6, view.scale);
+    return {
+        x: (screenPoint.x - view.offsetX) / s,
+        y: (screenPoint.y - view.offsetY) / s,
+    };
+}
+function toScreenPoint(worldPoint) {
+    return {
+        x: view.offsetX + view.scale * worldPoint.x,
+        y: view.offsetY + view.scale * worldPoint.y,
+    };
+}
+
+// Present world surface to on-screen with current view transform
+function present() {
+    if (!CanvasKit || !skSurface || !worldSurface) return;
+    const c = skSurface.getCanvas();
+    // Light grey background for area outside world surface
+    c.clear(CanvasKit.Color(237, 237, 237, 255));
+    // Ensure GPU offscreen is flushed before sampling
+    if (worldSurface.flush) worldSurface.flush();
+    const img = worldSurface.makeImageSnapshot();
+    c.save();
+    c.translate(view.offsetX, view.offsetY);
+    c.scale(view.scale, view.scale);
+    // Draw world area background as white so its bounds are obvious
+    const bgPaint = new CanvasKit.Paint();
+    bgPaint.setAntiAlias(true);
+    bgPaint.setStyle(CanvasKit.PaintStyle.Fill);
+    bgPaint.setColor(CanvasKit.Color(255, 255, 255, 255));
+    const worldRect = CanvasKit.XYWHRect(0, 0, Math.max(1, worldSize.width || 0), Math.max(1, worldSize.height || 0));
+    c.drawRect(worldRect, bgPaint);
+    bgPaint.delete();
+    c.drawImage(img, 0, 0);
+    c.restore();
+    img.delete();
+    skSurface.flush();
+}
+
 // Tool switching UI
 function updateToolVisibility() {
     const showPen = state.currentTool === 'pen' || state.currentTool === 'eraser';
@@ -288,11 +360,12 @@ dom.toolButtons.forEach(btn => {
 const clearBtn = document.getElementById('clear-btn');
 if (clearBtn) {
     clearBtn.addEventListener('click', () => {
-        if (!skSurface || !CanvasKit) return;
-        const c = skSurface.getCanvas();
+        if (!worldSurface || !CanvasKit) return;
+        const c = worldSurface.getCanvas();
         c.clear(CanvasKit.TRANSPARENT);
-        skSurface.flush();
+        worldSurface.flush && worldSurface.flush();
         clearOverlay();
+        present();
     });
 }
 
@@ -301,6 +374,9 @@ dom.brushShape.addEventListener('change', () => {
     state.pen.brushShape = dom.brushShape.value;
     state.eraser.brushShape = dom.brushShape.value;
     refreshBrushImages();
+    if (lastHoverScreenPoint && (state.currentTool === 'pen' || state.currentTool === 'eraser')) {
+        previewMove(lastHoverScreenPoint);
+    }
 });
 dom.strokeWidth.addEventListener('input', () => {
     const v = Number(dom.strokeWidth.value);
@@ -308,6 +384,9 @@ dom.strokeWidth.addEventListener('input', () => {
     state.eraser.strokeWidth = v;
     dom.strokeWidthVal.textContent = String(v);
     refreshBrushImages();
+    if (lastHoverScreenPoint && (state.currentTool === 'pen' || state.currentTool === 'eraser')) {
+        previewMove(lastHoverScreenPoint);
+    }
 });
 dom.rotateAngle.addEventListener('input', () => {
     const v = Number(dom.rotateAngle.value);
@@ -315,6 +394,9 @@ dom.rotateAngle.addEventListener('input', () => {
     state.eraser.rotateAngle = v;
     dom.rotateAngleVal.textContent = v + '°';
     refreshBrushImages();
+    if (lastHoverScreenPoint && (state.currentTool === 'pen' || state.currentTool === 'eraser')) {
+        previewMove(lastHoverScreenPoint);
+    }
 });
 dom.shapeType.addEventListener('change', () => {
     state.shape.type = dom.shapeType.value;
@@ -333,6 +415,9 @@ dom.opacity.addEventListener('input', () => {
     state.pen.opacity = v / 1000; // compensate tight stamping overlapping
     state.eraser.opacity = v / 1000;
     dom.opacityVal.textContent = `${v}%`;
+    if (lastHoverScreenPoint && (state.currentTool === 'pen' || state.currentTool === 'eraser')) {
+        previewMove(lastHoverScreenPoint);
+    }
 });
 
 // Brush width/height scaling (10% - 400%)
@@ -342,6 +427,9 @@ dom.brushWidth.addEventListener('input', () => {
     state.eraser.brushWidth = v / 100;
     dom.brushWidthVal.textContent = `${v}%`;
     refreshBrushImages();
+    if (lastHoverScreenPoint && (state.currentTool === 'pen' || state.currentTool === 'eraser')) {
+        previewMove(lastHoverScreenPoint);
+    }
 });
 dom.brushHeight.addEventListener('input', () => {
     const v = Math.max(10, Math.min(400, Number(dom.brushHeight.value)));
@@ -349,12 +437,16 @@ dom.brushHeight.addEventListener('input', () => {
     state.eraser.brushHeight = v / 100;
     dom.brushHeightVal.textContent = `${v}%`;
     refreshBrushImages();
+    if (lastHoverScreenPoint && (state.currentTool === 'pen' || state.currentTool === 'eraser')) {
+        previewMove(lastHoverScreenPoint);
+    }
 });
 
 // Pointer handling (mouse + touch unified)
 let isPointerDown = false;
 let lastPoint = null;
 const activePointers = new Map(); // pointerId -> {x,y}
+let lastHoverScreenPoint = null; // screen-space cursor for overlay refresh on zoom
 
 // return point is in pixel space considering dpi from event
 function getStagePoint(evt) {
@@ -371,34 +463,59 @@ function getStagePoint(evt) {
     return { x: (clientX - rect.left) * dpr, y: (clientY - rect.top) * dpr };
 }
 
+function getWorldPoint(evt) {
+    const sp = getStagePoint(evt);
+    return toWorldPoint(sp);
+}
+
 dom.stage.addEventListener('pointerdown', e => {
     isPointerDown = true;
-    const p = getStagePoint(e);
-    activePointers.set(e.pointerId, p);
-    lastPoint = p;
-    beginToolGesture(p, e.pointerId);
+    const pw = getWorldPoint(e);
+    activePointers.set(e.pointerId, pw);
+    lastPoint = pw;
+    // Space/Alt/right/middle pan support
+    if (e.button === 1 || e.button === 2 || e.altKey || e.metaKey || e.ctrlKey) {
+        gesture = { ...(gesture || {}), panning: true, panLast: getStagePoint(e) };
+    } else {
+        beginToolGesture(pw, e.pointerId);
+    }
     // Prevent scrolling on mobile
     dom.stage.setPointerCapture(e.pointerId);
     e.preventDefault();
 });
 
 dom.stage.addEventListener('pointermove', e => {
-    const p = getStagePoint(e);
+    const sp = getStagePoint(e);
+    const pw = toWorldPoint(sp);
     if (!isPointerDown) {
-        previewMove(p);
+        lastHoverScreenPoint = sp;
+        previewMove(sp);
         return;
     }
-    activePointers.set(e.pointerId, p);
-    drawToolStroke(p);
-    lastPoint = p;
+    if (gesture && gesture.panning) {
+        const last = gesture.panLast || sp;
+        const dx = sp.x - last.x;
+        const dy = sp.y - last.y;
+        view.offsetX += dx;
+        view.offsetY += dy;
+        gesture.panLast = sp;
+        present();
+    } else {
+        activePointers.set(e.pointerId, pw);
+        drawToolStroke(pw);
+        lastPoint = pw;
+    }
     e.preventDefault();
 });
 
 dom.stage.addEventListener('pointerup', e => {
-    const p = getStagePoint(e);
+    const p = getWorldPoint(e);
     activePointers.delete(e.pointerId);
     isPointerDown = activePointers.size > 0;
-    if (!isPointerDown) {
+    if (gesture && gesture.panning) {
+        gesture.panning = false;
+        gesture.panLast = null;
+    } else if (!isPointerDown) {
         finalizeToolGesture(p);
     }
     dom.stage.releasePointerCapture(e.pointerId);
@@ -450,6 +567,35 @@ window.addEventListener('keydown', e => {
     clearOverlay();
 });
 
+// Wheel pan/zoom (trackpad/mouse)
+dom.stage.addEventListener(
+    'wheel',
+    e => {
+        // Allow ctrl/cmd+wheel to zoom, otherwise pan
+        e.preventDefault();
+        const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+        if (e.ctrlKey || e.metaKey) {
+            const rect = dom.stage.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * dpr;
+            const my = (e.clientY - rect.top) * dpr;
+            const pre = toWorldPoint({ x: mx, y: my });
+            const zoom = Math.pow(1.0015, -e.deltaY);
+            const newScale = Math.max(0.05, Math.min(8, view.scale * zoom));
+            // Keep cursor anchored
+            view.offsetX = mx - pre.x * newScale;
+            view.offsetY = my - pre.y * newScale;
+            view.scale = newScale;
+        } else {
+            view.offsetX -= e.deltaX * dpr;
+            view.offsetY -= e.deltaY * dpr;
+        }
+        present();
+        // Refresh overlay (brush outline) after zoom change
+        if (lastHoverScreenPoint) previewMove(lastHoverScreenPoint);
+    },
+    { passive: false }
+);
+
 // Tool gesture helpers
 let gesture = null; // stores per-gesture temp data
 
@@ -470,7 +616,7 @@ function beginToolGesture(p, pointerId) {
         paint.setColor(CanvasKit.Color(0, 0, 0, 255));
         paint.setAlphaf(state.pen.opacity);
         paint.setStyle(CanvasKit.PaintStyle.Fill);
-        const c = skSurface.getCanvas();
+        const c = worldSurface.getCanvas();
 
         // init smoothing state
         curPos = [p.x, p.y];
@@ -479,14 +625,15 @@ function beginToolGesture(p, pointerId) {
 
         stampBrushBlit(c, paint, p.x, p.y, state.currentTool === 'eraser');
         paint.delete();
-        skSurface.flush();
+        worldSurface.flush && worldSurface.flush();
         // Hide any hover outline while drawing
         clearOverlay();
+        present();
     }
 }
 
 function drawToolStroke(p) {
-    if (!CanvasKit || !skSurface) return;
+    if (!CanvasKit || !worldSurface) return;
     if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
         // Stamp oriented brush between last and p
         // Ensure hover outline is hidden during drawing
@@ -497,7 +644,7 @@ function drawToolStroke(p) {
         paint.setColor(CanvasKit.Color(0, 0, 0, 255));
         paint.setAlphaf(state.pen.opacity);
         paint.setStyle(CanvasKit.PaintStyle.Fill);
-        const canvas = skSurface.getCanvas();
+        const canvas = worldSurface.getCanvas();
 
         // smoothing
         const damp = Number(smoothnessValEl.textContent);
@@ -544,8 +691,9 @@ function drawToolStroke(p) {
         }
 
         paint.delete();
-        skSurface.flush();
+        worldSurface.flush && worldSurface.flush();
         gesture.last = p;
+        present();
     } else if (state.currentTool === 'shape') {
         // draw filled preview on overlay
         const c = overlaySurface.getCanvas();
@@ -554,8 +702,11 @@ function drawToolStroke(p) {
         paint.setAntiAlias(true);
         paint.setColor(CanvasKit.Color(0, 0, 0, 1));
         paint.setStyle(CanvasKit.PaintStyle.Fill);
-        const { x: x0, y: y0 } = gesture.start;
-        const { x: x1, y: y1 } = p;
+        // Convert world to screen for preview
+        const s0 = toScreenPoint(gesture.start);
+        const s1 = toScreenPoint(p);
+        const { x: x0, y: y0 } = s0;
+        const { x: x1, y: y1 } = s1;
         if (state.shape.type === 'line') {
             drawFilledLine(c, x0, y0, x1, y1, state.shape.strokeWidth, paint);
         } else if (state.shape.type === 'rect') {
@@ -591,10 +742,10 @@ function drawToolStroke(p) {
 }
 
 function finalizeToolGesture(p) {
-    if (!CanvasKit || !skSurface) return;
+    if (!CanvasKit || !worldSurface) return;
     if (state.currentTool === 'shape') {
         // commit filled shape to draw canvas
-        const canvas = skSurface.getCanvas();
+        const canvas = worldSurface.getCanvas();
         const paint = new CanvasKit.Paint();
         paint.setAntiAlias(true);
         paint.setColor(CanvasKit.Color(0, 0, 0, 1));
@@ -617,8 +768,9 @@ function finalizeToolGesture(p) {
             canvas.drawOval(CanvasKit.XYWHRect(cx - rx, cy - ry, rx * 2, ry * 2), paint);
         }
         paint.delete();
-        skSurface.flush();
+        worldSurface.flush && worldSurface.flush();
         clearOverlay();
+        present();
     } else if (state.currentTool === 'select') {
         finalizeLassoSelection(gesture.points);
     }
@@ -677,13 +829,20 @@ function drawBrushOutline(x, y) {
     paintInner.setStyle(CanvasKit.PaintStyle.Stroke);
     paintInner.setStrokeWidth(1);
     paintInner.setColor(CanvasKit.Color(0, 0, 0, 255));
-    const size = state.pen.strokeWidth;
+    const size = state.pen.strokeWidth * view.scale;
     const hw = size / 2;
     const rx = hw * (state.pen.brushWidth || 1);
     const ry = hw * (state.pen.brushHeight || 1);
+    // Clamp outline center so it doesn't get cropped at screen edges
+    const w = dom.overlayCanvas.width || 0;
+    const h = dom.overlayCanvas.height || 0;
+    const margin = Math.max(rx, ry);
+    const cx = Math.max(margin, Math.min(w - margin, x));
+    const cy = Math.max(margin, Math.min(h - margin, y));
     const angleDeg = state.pen.rotateAngle || 0;
     const save = c.save();
-    c.translate(x, y);
+    // x,y are screen coords
+    c.translate(cx, cy);
     c.rotate(angleDeg, 0, 0);
     if (state.pen.brushShape === 'ellipse') {
         const rect = CanvasKit.XYWHRect(-rx, -ry, rx * 2, ry * 2);
@@ -729,8 +888,13 @@ function previewLasso(points) {
     c.clear(CanvasKit.TRANSPARENT);
     const path = new CanvasKit.Path();
     if (points.length) {
-        path.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) path.lineTo(points[i].x, points[i].y);
+        // convert world points to screen
+        const p0 = toScreenPoint(points[0]);
+        path.moveTo(p0.x, p0.y);
+        for (let i = 1; i < points.length; i++) {
+            const pi = toScreenPoint(points[i]);
+            path.lineTo(pi.x, pi.y);
+        }
     }
     const fillPaint = new CanvasKit.Paint();
     fillPaint.setAntiAlias(true);
@@ -777,20 +941,20 @@ function finalizeLassoSelection(points) {
     // Align world path to offscreen by translating
     oc.translate(-bx, -by);
     oc.clipPath(path, CanvasKit.ClipOp.Intersect, true);
-    const fullImage = skSurface.makeImageSnapshot();
+    const fullImage = worldSurface.makeImageSnapshot();
     const src = CanvasKit.XYWHRect(bx, by, bw, bh);
     const dst = CanvasKit.XYWHRect(0, 0, bw, bh);
     oc.drawImageRect(fullImage, src, dst, null);
     oc.restore();
     const selImage = offscreen.makeImageSnapshot();
     // Clear selection area from base canvas
-    const baseCanvas = skSurface.getCanvas();
+    const baseCanvas = worldSurface.getCanvas();
     const clearPaint = new CanvasKit.Paint();
     clearPaint.setAntiAlias(true);
     clearPaint.setBlendMode(CanvasKit.BlendMode.Clear);
     baseCanvas.drawPath(path, clearPaint);
     clearPaint.delete();
-    skSurface.flush();
+    worldSurface.flush && worldSurface.flush();
     // Dispose temps
     fullImage.delete();
     offscreen.dispose();
@@ -805,6 +969,7 @@ function finalizeLassoSelection(points) {
     };
     // Show overlay with floating image
     drawSelectionOverlay(true);
+    present();
 }
 
 function drawSelectionOverlay(showImage) {
@@ -815,6 +980,9 @@ function drawSelectionOverlay(showImage) {
     if (showImage) {
         const { image, bounds, offset, transform } = state.selection;
         const save = c.save();
+        // apply view transform (world -> screen)
+        c.translate(view.offsetX, view.offsetY);
+        c.scale(view.scale, view.scale);
         c.translate(offset.x + transform.tx + bounds.w / 2, offset.y + transform.ty + bounds.h / 2);
         const rotDeg = ((transform.rotation || 0) * 180) / Math.PI;
         c.rotate(rotDeg, 0, 0);
@@ -835,6 +1003,9 @@ function drawSelectionOverlay(showImage) {
     const cx = bounds.x + bounds.w / 2;
     const cy = bounds.y + bounds.h / 2;
     c.save();
+    // view transform
+    c.translate(view.offsetX, view.offsetY);
+    c.scale(view.scale, view.scale);
     c.translate(transform.tx, transform.ty);
     c.translate(cx, cy);
     const outlineRotDeg = ((transform.rotation || 0) * 180) / Math.PI;
@@ -897,7 +1068,7 @@ function distance(a, b) {
 function commitSelection() {
     if (!state.selection) return;
     const { image, bounds, offset, transform } = state.selection;
-    const c = skSurface.getCanvas();
+    const c = worldSurface.getCanvas();
     const save = c.save();
     c.translate(offset.x + transform.tx + bounds.w / 2, offset.y + transform.ty + bounds.h / 2);
     c.rotate(transform.rotation || 0);
@@ -905,22 +1076,24 @@ function commitSelection() {
     c.translate(-bounds.w / 2, -bounds.h / 2);
     c.drawImage(image, 0, 0);
     c.restoreToCount(save);
-    skSurface.flush();
+    worldSurface.flush && worldSurface.flush();
     disposeSelection();
     clearOverlay();
+    present();
 }
 
 function cancelSelection() {
     if (!state.selection) return;
     const { image, bounds, offset } = state.selection;
-    const c = skSurface.getCanvas();
+    const c = worldSurface.getCanvas();
     const save = c.save();
     c.translate(offset.x, offset.y);
     c.drawImage(image, 0, 0);
     c.restoreToCount(save);
-    skSurface.flush();
+    worldSurface.flush && worldSurface.flush();
     disposeSelection();
     clearOverlay();
+    present();
 }
 
 function disposeSelection() {

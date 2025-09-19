@@ -448,6 +448,7 @@ let lastPoint = null;
 const activePointers = new Map(); // pointerId -> {x,y}
 let lastHoverScreenPoint = null; // screen-space cursor for overlay refresh on zoom
 const screenPointers = new Map(); // pointerId -> screen-space {x,y}
+let lastPointerType = null; // 'mouse' | 'pen' | 'touch'
 
 // return point is in pixel space considering dpi from event
 function getStagePoint(evt) {
@@ -471,6 +472,7 @@ function getWorldPoint(evt) {
 
 dom.stage.addEventListener('pointerdown', e => {
     isPointerDown = true;
+    lastPointerType = e.pointerType || lastPointerType;
     const sp = getStagePoint(e);
     const pw = toWorldPoint(sp);
     activePointers.set(e.pointerId, pw);
@@ -500,6 +502,7 @@ dom.stage.addEventListener('pointerdown', e => {
             centroidStart,
             worldAtCentroid,
         };
+        clearOverlay();
     }
     // Prevent scrolling on mobile
     dom.stage.setPointerCapture(e.pointerId);
@@ -653,6 +656,8 @@ let gesture = null; // stores per-gesture temp data
 
 function beginToolGesture(p, pointerId) {
     if (!CanvasKit || !skSurface) return;
+    // Avoid starting a drawing gesture during pinch on touch
+    if (gesture && gesture.pinch && gesture.pinch.active) return;
     gesture = { start: p, last: p, pointerId, points: [p] };
     if (state.currentTool === 'shape') {
         clearOverlay();
@@ -686,6 +691,8 @@ function beginToolGesture(p, pointerId) {
 
 function drawToolStroke(p) {
     if (!CanvasKit || !worldSurface) return;
+    // Skip drawing while pinch-zooming
+    if (gesture && gesture.pinch && gesture.pinch.active) return;
     if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
         // Stamp oriented brush between last and p
         // Ensure hover outline is hidden during drawing

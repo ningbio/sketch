@@ -31,14 +31,14 @@ const state = {
 let invMass = 1.0;
 // let damp = 0.05; // tweak this for level of smoothness
 const DEFAULT_N_EXTRA = 4; // default pre-sampling
-const PENCIL_N_EXTRA = 4; // Apple Pencil pre-sampling
+const PENCIL_N_EXTRA = 2; // Apple Pencil pre-sampling
 let nExtra = DEFAULT_N_EXTRA; // active pre-sampling value
 let curPos = [0, 0];
 let curVel = [0, 0];
 let curAcc = [0, 0];
 
 // Debug: draw raw input points before resampling as red crosses
-const DEBUG_DRAW_INPUT = true;
+const DEBUG_DRAW_INPUT = false;
 let inputDebugPoints = [];
 
 const dom = {
@@ -531,14 +531,34 @@ dom.stage.addEventListener('pointerdown', e => {
 dom.stage.addEventListener('pointermove', e => {
     e.preventDefault();
     const sp = getStagePoint(e);
-    const pw = toWorldPoint(sp);
+    // Average coalesced events for pen to reduce micro-jitter (weighted towards latest)
+    let spForInput = sp;
+    if (e.pointerType === 'pen' && typeof e.getCoalescedEvents === 'function') {
+        const ces = e.getCoalescedEvents();
+        if (ces && ces.length) {
+            const rect = dom.stage.getBoundingClientRect();
+            const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+            let sumX = 0,
+                sumY = 0,
+                wsum = 0;
+            for (let i = 0; i < ces.length; i++) {
+                const ce = ces[i];
+                const w = i + 1; // linear weights favoring newest
+                sumX += (ce.clientX - rect.left) * dpr * w;
+                sumY += (ce.clientY - rect.top) * dpr * w;
+                wsum += w;
+            }
+            if (wsum > 0) spForInput = { x: sumX / wsum, y: sumY / wsum };
+        }
+    }
+    const pw = toWorldPoint(spForInput);
     if (!isPointerDown) {
         lastHoverScreenPoint = sp;
         previewMove(sp);
         return;
     }
     // Update pointer maps
-    screenPointers.set(e.pointerId, sp);
+    screenPointers.set(e.pointerId, spForInput);
     activePointers.set(e.pointerId, pw);
     // Handle pinch zoom if active with two touches
     if (gesture && gesture.pinch && gesture.pinch.active && screenPointers.size >= 2) {

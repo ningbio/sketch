@@ -30,7 +30,9 @@ const state = {
 // path smoothing
 let invMass = 1.0;
 // let damp = 0.05; // tweak this for level of smoothness
-let nExtra = 4; // pre-smoothing by resampling more points
+const DEFAULT_N_EXTRA = 4; // default pre-sampling
+const PENCIL_N_EXTRA = 7; // Apple Pencil pre-sampling
+let nExtra = DEFAULT_N_EXTRA; // active pre-sampling value
 let curPos = [0, 0];
 let curVel = [0, 0];
 let curAcc = [0, 0];
@@ -475,6 +477,13 @@ dom.stage.addEventListener('pointerdown', e => {
     e.preventDefault();
     isPointerDown = true;
     lastPointerType = e.pointerType || lastPointerType;
+    // Detect Apple Pencil characteristics and adjust smoothing
+    if (e.pointerType === 'pen' && typeof e.width === 'number' && typeof e.height === 'number') {
+        // Heuristic: iOS reports very small width/height for pencil; prefer pen type
+        nExtra = PENCIL_N_EXTRA;
+    } else if (e.pointerType === 'touch') {
+        nExtra = DEFAULT_N_EXTRA;
+    }
     const sp = getStagePoint(e);
     const pw = toWorldPoint(sp);
     activePointers.set(e.pointerId, pw);
@@ -582,6 +591,7 @@ dom.stage.addEventListener('pointerup', e => {
         finalizeToolGesture(p);
     }
     dom.stage.releasePointerCapture(e.pointerId);
+    if (activePointers.size === 0) nExtra = DEFAULT_N_EXTRA;
 });
 
 dom.stage.addEventListener('pointerleave', () => {

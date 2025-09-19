@@ -481,10 +481,11 @@ dom.stage.addEventListener('pointerdown', e => {
     // Space/Alt/right/middle pan support
     if (e.button === 1 || e.button === 2 || e.altKey || e.metaKey || e.ctrlKey) {
         gesture = { ...(gesture || {}), panning: true, panLast: getStagePoint(e) };
-    } else {
+    } else if (e.pointerType !== 'touch') {
+        // For mouse/pen, begin immediately; for touch, defer until we know it's not a pinch
         beginToolGesture(pw, e.pointerId);
     }
-    // Start pinch-zoom if two touches active
+    // Start pinch-zoom if two touches active (before any draw begins)
     if (e.pointerType === 'touch' && screenPointers.size === 2) {
         const pts = Array.from(screenPointers.values());
         const c0 = pts[0];
@@ -503,6 +504,9 @@ dom.stage.addEventListener('pointerdown', e => {
             worldAtCentroid,
         };
         clearOverlay();
+        // Ensure no drawing gesture is considered active
+        gesture.start = null;
+        return;
     }
     // Prevent scrolling on mobile
     dom.stage.setPointerCapture(e.pointerId);
@@ -550,6 +554,10 @@ dom.stage.addEventListener('pointermove', e => {
         gesture.panLast = sp;
         present();
     } else {
+        // For touch, if no gesture is started and not pinching, begin on first move
+        if (e.pointerType === 'touch' && !(gesture && gesture.pinch && gesture.pinch.active) && !gesture) {
+            beginToolGesture(pw, e.pointerId);
+        }
         drawToolStroke(pw);
         lastPoint = pw;
     }
@@ -693,6 +701,8 @@ function drawToolStroke(p) {
     if (!CanvasKit || !worldSurface) return;
     // Skip drawing while pinch-zooming
     if (gesture && gesture.pinch && gesture.pinch.active) return;
+    // If touch and more than one active pointer, don't draw
+    if (lastPointerType === 'touch' && screenPointers.size >= 2) return;
     if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
         // Stamp oriented brush between last and p
         // Ensure hover outline is hidden during drawing

@@ -43,8 +43,8 @@ let inputDebugPoints = [];
 
 // Pen pressure → stamp scaling
 let lastPressure = 1.0;
-const PEN_PRESSURE_MIN_SCALE = 0.4; // lighter = smaller
-const PEN_PRESSURE_MAX_SCALE = 1.8; // heavier = larger
+let PEN_PRESSURE_MIN_SCALE = 0.4; // lighter = smaller (made mutable for UI slider)
+let PEN_PRESSURE_MAX_SCALE = 1.8; // heavier = larger (made mutable for UI slider)
 function clamp01(v) {
     return v < 0 ? 0 : v > 1 ? 1 : v;
 }
@@ -74,6 +74,10 @@ const dom = {
     brushWidthVal: document.getElementById('brush-width-val'),
     brushHeight: document.getElementById('brush-height'),
     brushHeightVal: document.getElementById('brush-height-val'),
+    pressureMin: document.getElementById('pressure-min'),
+    pressureMinVal: document.getElementById('pressure-min-val'),
+    pressureMax: document.getElementById('pressure-max'),
+    pressureMaxVal: document.getElementById('pressure-max-val'),
 };
 
 // Add after DOM bindings
@@ -99,6 +103,52 @@ if (smoothnessEl && smoothnessValEl) {
     smoothnessEl.addEventListener('input', () => {
         const v = Math.max(0.01, Math.min(0.1, Number(smoothnessEl.value)));
         smoothnessValEl.textContent = v.toFixed(3);
+    });
+}
+
+// Pressure min/max bindings
+if (dom.pressureMin && dom.pressureMinVal && dom.pressureMax && dom.pressureMaxVal) {
+    // Initialize from current slider values
+    const minFromDom = Number(dom.pressureMin.value || '0.4');
+    const maxFromDom = Number(dom.pressureMax.value || '1.8');
+    PEN_PRESSURE_MIN_SCALE = Math.max(Number(dom.pressureMin.min || '0.05'), Math.min(Number(dom.pressureMin.max || '1.0'), minFromDom));
+    PEN_PRESSURE_MAX_SCALE = Math.max(
+        Number(dom.pressureMax.min || '1.0'),
+        Math.min(Number(dom.pressureMax.max || '3.0'), Math.max(PEN_PRESSURE_MIN_SCALE, maxFromDom))
+    );
+    dom.pressureMin.value = String(PEN_PRESSURE_MIN_SCALE);
+    dom.pressureMax.value = String(PEN_PRESSURE_MAX_SCALE);
+    dom.pressureMinVal.textContent = PEN_PRESSURE_MIN_SCALE.toFixed(2) + '×';
+    dom.pressureMaxVal.textContent = PEN_PRESSURE_MAX_SCALE.toFixed(2) + '×';
+
+    dom.pressureMin.addEventListener('input', () => {
+        const v = Math.max(
+            Number(dom.pressureMin.min || '0.05'),
+            Math.min(Number(dom.pressureMin.max || '3.0'), Number(dom.pressureMin.value))
+        );
+        PEN_PRESSURE_MIN_SCALE = v;
+        // Ensure min <= max
+        if (PEN_PRESSURE_MIN_SCALE > PEN_PRESSURE_MAX_SCALE) {
+            PEN_PRESSURE_MAX_SCALE = PEN_PRESSURE_MIN_SCALE;
+            dom.pressureMax.value = String(PEN_PRESSURE_MAX_SCALE);
+            dom.pressureMaxVal.textContent = PEN_PRESSURE_MAX_SCALE.toFixed(2) + '×';
+        }
+        dom.pressureMinVal.textContent = PEN_PRESSURE_MIN_SCALE.toFixed(2) + '×';
+    });
+
+    dom.pressureMax.addEventListener('input', () => {
+        const v = Math.max(
+            Number(dom.pressureMax.min || '1.0'),
+            Math.min(Number(dom.pressureMax.max || '3.0'), Number(dom.pressureMax.value))
+        );
+        PEN_PRESSURE_MAX_SCALE = v;
+        // Ensure min <= max
+        if (PEN_PRESSURE_MAX_SCALE < PEN_PRESSURE_MIN_SCALE) {
+            PEN_PRESSURE_MIN_SCALE = PEN_PRESSURE_MAX_SCALE;
+            dom.pressureMin.value = String(PEN_PRESSURE_MIN_SCALE);
+            dom.pressureMinVal.textContent = PEN_PRESSURE_MIN_SCALE.toFixed(2) + '×';
+        }
+        dom.pressureMaxVal.textContent = PEN_PRESSURE_MAX_SCALE.toFixed(2) + '×';
     });
 }
 

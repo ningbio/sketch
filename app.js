@@ -666,10 +666,7 @@ dom.stage.addEventListener('pointermove', e => {
         present();
     } else {
         // If no drawing gesture is started and not pinching, begin on first move
-        if (
-            !(gesture && gesture.pinch && gesture.pinch.active) &&
-            !(gesture && gesture.start)
-        ) {
+        if (!(gesture && gesture.pinch && gesture.pinch.active) && !(gesture && gesture.start)) {
             beginToolGesture(pw, e.pointerId);
         }
         if (DEBUG_DRAW_INPUT) inputDebugPoints.push({ x: sp.x, y: sp.y });
@@ -1101,24 +1098,24 @@ function stampBrush(canvas, paint, x, y, pressure) {
 }
 
 function stampBrushBlit(canvas, paint, x, y, isErasing, pressure) {
-    const img = isErasing ? eraserImage || brushImage : brushImage;
-    if (img) {
-        const p = pressure == null ? (lastPointerType === 'pen' ? lastPressure : 1) : pressure;
-        const pressureScale = lastPointerType === 'pen' ? pressureToScale(p) : 1;
-        const w = Math.max(1, Math.round(img.width() * pressureScale));
-        const h = Math.max(1, Math.round(img.height() * pressureScale));
-        const save = canvas.save();
-        const angleDeg = state.pen.rotateAngle || 0;
-        canvas.translate(x, y);
-        canvas.rotate(angleDeg, 0, 0);
-        canvas.translate(-w / 2, -h / 2);
-        // Draw scaled image by destination rect to avoid allocating a resized image
-        const src = CanvasKit.XYWHRect(0, 0, img.width(), img.height());
-        const dst = CanvasKit.XYWHRect(0, 0, w, h);
-        canvas.drawImageRect(img, src, dst, paint);
-        canvas.restoreToCount(save);
-        return;
-    }
+    // const img = isErasing ? eraserImage || brushImage : brushImage;
+    // if (img) {
+    //     const p = pressure == null ? (lastPointerType === 'pen' ? lastPressure : 1) : pressure;
+    //     const pressureScale = lastPointerType === 'pen' ? pressureToScale(p) : 1;
+    //     const w = Math.max(1, Math.round(img.width() * pressureScale));
+    //     const h = Math.max(1, Math.round(img.height() * pressureScale));
+    //     const save = canvas.save();
+    //     const angleDeg = state.pen.rotateAngle || 0;
+    //     canvas.translate(x, y);
+    //     canvas.rotate(angleDeg, 0, 0);
+    //     canvas.translate(-w / 2, -h / 2);
+    //     // Draw scaled image by destination rect to avoid allocating a resized image
+    //     const src = CanvasKit.XYWHRect(0, 0, img.width(), img.height());
+    //     const dst = CanvasKit.XYWHRect(0, 0, w, h);
+    //     canvas.drawImageRect(img, src, dst, paint);
+    //     canvas.restoreToCount(save);
+    //     return;
+    // }
     // Fallback to vector stamp
     stampBrush(canvas, paint, x, y, pressure);
 }

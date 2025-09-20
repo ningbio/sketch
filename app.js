@@ -38,7 +38,7 @@ let curVel = [0, 0];
 let curAcc = [0, 0];
 
 // Debug: draw raw input points before resampling as red crosses
-const DEBUG_DRAW_INPUT = true;
+const DEBUG_DRAW_INPUT = false;
 let inputDebugPoints = [];
 
 // Pen pressure → stamp scaling

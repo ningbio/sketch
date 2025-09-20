@@ -38,8 +38,22 @@ let curVel = [0, 0];
 let curAcc = [0, 0];
 
 // Debug: draw raw input points before resampling as red crosses
-const DEBUG_DRAW_INPUT = false;
+const DEBUG_DRAW_INPUT = true;
 let inputDebugPoints = [];
+
+// Pen pressure → stamp scaling
+let lastPressure = 1.0;
+const PEN_PRESSURE_MIN_SCALE = 0.4; // lighter = smaller
+const PEN_PRESSURE_MAX_SCALE = 1.8; // heavier = larger
+function clamp01(v) {
+    return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+function pressureToScale(p) {
+    const t = clamp01(p == null ? 1 : p);
+    return PEN_PRESSURE_MIN_SCALE + (PEN_PRESSURE_MAX_SCALE - PEN_PRESSURE_MIN_SCALE) * t;
+}
+// Previous pressure at the start of the current smoothing step
+let prevPressureForStroke = 1.0;
 
 const dom = {
     stage: document.getElementById('stage'),
@@ -494,6 +508,14 @@ dom.stage.addEventListener('pointerdown', e => {
     screenPointers.set(e.pointerId, sp);
     lastPoint = pw;
     if (DEBUG_DRAW_INPUT) inputDebugPoints = [];
+    // Record initial pressure for pen
+    if (e.pointerType === 'pen') {
+        lastPressure = e.pressure != null ? e.pressure : 1.0;
+        prevPressureForStroke = lastPressure;
+    } else {
+        lastPressure = 1.0;
+        prevPressureForStroke = 1.0;
+    }
     // Space/Alt/right/middle pan support
     if (e.button === 1 || e.button === 2 || e.altKey || e.metaKey || e.ctrlKey) {
         gesture = { ...(gesture || {}), panning: true, panLast: getStagePoint(e) };
@@ -552,6 +574,9 @@ dom.stage.addEventListener('pointermove', e => {
         }
     }
     const pw = toWorldPoint(spForInput);
+    if (e.pointerType === 'pen') {
+        lastPressure = e.pressure != null ? e.pressure : lastPressure;
+    }
     if (!isPointerDown) {
         lastHoverScreenPoint = sp;
         previewMove(sp);
@@ -725,7 +750,7 @@ function beginToolGesture(p, pointerId) {
         curVel = [0, 0];
         curAcc = [0, 0];
 
-        stampBrushBlit(c, paint, p.x, p.y, state.currentTool === 'eraser');
+        stampBrushBlit(c, paint, p.x, p.y, state.currentTool === 'eraser', lastPressure);
         paint.delete();
         worldSurface.flush && worldSurface.flush();
         // Hide any hover outline while drawing
@@ -782,6 +807,8 @@ function drawToolStroke(p) {
 
         // add extra points using forward Euler integrator (not unconditionally stable)
         const points = [{ x: curPos[0], y: curPos[1] }];
+        const startPressure = prevPressureForStroke;
+        const endPressure = lastPressure;
         for (let i = 0; i < nExtra; i++) {
             for (let k = 0; k < 2; k++) {
                 curAcc[k] += deltaAcc[k];
@@ -808,9 +835,14 @@ function drawToolStroke(p) {
                 const t = k / steps;
                 const x = p0.x + dx * t;
                 const y = p0.y + dy * t;
-                stampBrushBlit(canvas, paint, x, y, state.currentTool === 'eraser');
+                // Linear interpolate pressure across the resampled segment
+                const pressure = startPressure + (endPressure - startPressure) * ((i + t) / (points.length - 1));
+                stampBrushBlit(canvas, paint, x, y, state.currentTool === 'eraser', pressure);
             }
         }
+
+        // Update previous pressure for next smoothing window
+        prevPressureForStroke = lastPressure;
 
         paint.delete();
         worldSurface.flush && worldSurface.flush();
@@ -900,8 +932,9 @@ function finalizeToolGesture(p) {
     gesture = null;
 }
 
-function stampBrush(canvas, paint, x, y) {
-    const size = state.pen.strokeWidth;
+function stampBrush(canvas, paint, x, y, pressure) {
+    const p = pressure == null ? (lastPointerType === 'pen' ? lastPressure : 1) : pressure;
+    const size = state.pen.strokeWidth * (lastPointerType === 'pen' ? pressureToScale(p) : 1);
     const hw = size / 2;
     const angleDeg = state.pen.rotateAngle || 0;
     const rx = hw * (state.pen.brushWidth || 1);
@@ -917,22 +950,27 @@ function stampBrush(canvas, paint, x, y) {
     canvas.restoreToCount(save);
 }
 
-function stampBrushBlit(canvas, paint, x, y, isErasing) {
+function stampBrushBlit(canvas, paint, x, y, isErasing, pressure) {
     const img = isErasing ? eraserImage || brushImage : brushImage;
     if (img) {
-        const w = img.width();
-        const h = img.height();
+        const p = pressure == null ? (lastPointerType === 'pen' ? lastPressure : 1) : pressure;
+        const pressureScale = lastPointerType === 'pen' ? pressureToScale(p) : 1;
+        const w = Math.max(1, Math.round(img.width() * pressureScale));
+        const h = Math.max(1, Math.round(img.height() * pressureScale));
         const save = canvas.save();
         const angleDeg = state.pen.rotateAngle || 0;
         canvas.translate(x, y);
         canvas.rotate(angleDeg, 0, 0);
         canvas.translate(-w / 2, -h / 2);
-        canvas.drawImage(img, 0, 0, paint);
+        // Draw scaled image by destination rect to avoid allocating a resized image
+        const src = CanvasKit.XYWHRect(0, 0, img.width(), img.height());
+        const dst = CanvasKit.XYWHRect(0, 0, w, h);
+        canvas.drawImageRect(img, src, dst, paint);
         canvas.restoreToCount(save);
         return;
     }
     // Fallback to vector stamp
-    stampBrush(canvas, paint, x, y);
+    stampBrush(canvas, paint, x, y, pressure);
 }
 
 function drawBrushOutline(x, y) {

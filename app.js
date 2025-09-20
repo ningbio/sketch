@@ -897,6 +897,66 @@ function drawToolStroke(p) {
 
 function finalizeToolGesture(p) {
     if (!CanvasKit || !worldSurface) return;
+    if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
+        // Final catch-up: advance the smoother one more integration window using current velocity/acceleration
+        const canvas = worldSurface.getCanvas();
+        const paint = new CanvasKit.Paint();
+        paint.setAntiAlias(true);
+        paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.DstOut : CanvasKit.BlendMode.SrcOver);
+        paint.setColor(CanvasKit.Color(0, 0, 0, 255));
+        paint.setAlphaf(state.pen.opacity);
+        paint.setStyle(CanvasKit.PaintStyle.Fill);
+
+        // Use the last raw point as the target for the integrator, but don't linearly snap to it
+        const damp = Number(smoothnessValEl.textContent);
+        const target = [p.x, p.y];
+        const totalAcc = [(target[0] - curPos[0]) * invMass, (target[1] - curPos[1]) * invMass];
+        const targetVel = [(curVel[0] + totalAcc[0]) * damp, (curVel[1] + totalAcc[1]) * damp];
+        const deltaAcc = [
+            ((targetVel[0] - curVel[0] - nExtra * curAcc[0]) * 2) / (nExtra * (nExtra + 1)),
+            ((targetVel[1] - curVel[1] - nExtra * curAcc[1]) * 2) / (nExtra * (nExtra + 1)),
+        ];
+
+        const points = [{ x: curPos[0], y: curPos[1] }];
+        const startPressure = prevPressureForStroke;
+        const endPressure = lastPressure;
+        for (let i = 0; i < nExtra; i++) {
+            for (let k = 0; k < 2; k++) {
+                curAcc[k] += deltaAcc[k];
+                curVel[k] += curAcc[k];
+                curPos[k] += curVel[k];
+            }
+            points.push({ x: curPos[0], y: curPos[1] });
+        }
+
+        for (let i = 0; i < points.length - 1; i++) {
+            const p0 = points[i];
+            const p1 = points[i + 1];
+            const dx = p1.x - p0.x;
+            const dy = p1.y - p0.y;
+            const dist = Math.hypot(dx, dy) || 0.0001;
+            const base = state.pen.strokeWidth / 2;
+            const rx = base * (state.pen.brushWidth || 1);
+            const ry = base * (state.pen.brushHeight || 1);
+            const step = Math.min(0.2, Math.min(rx, ry));
+            const steps = Math.ceil(dist / step);
+            for (let k = 1; k <= steps; k++) {
+                const t = k / steps;
+                const x = p0.x + dx * t;
+                const y = p0.y + dy * t;
+                const pressure = startPressure + (endPressure - startPressure) * ((i + t) / (points.length - 1));
+                stampBrushBlit(canvas, paint, x, y, state.currentTool === 'eraser', pressure);
+            }
+        }
+
+        prevPressureForStroke = lastPressure;
+        paint.delete();
+        worldSurface.flush && worldSurface.flush();
+        clearOverlay();
+        present();
+        gesture = null;
+        return;
+    }
     if (state.currentTool === 'shape') {
         // commit filled shape to draw canvas
         const canvas = worldSurface.getCanvas();

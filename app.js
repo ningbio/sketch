@@ -665,8 +665,11 @@ dom.stage.addEventListener('pointermove', e => {
         gesture.panLast = sp;
         present();
     } else {
-        // For touch, if no gesture is started and not pinching, begin on first move
-        if (e.pointerType === 'touch' && !(gesture && gesture.pinch && gesture.pinch.active) && !gesture) {
+        // If no drawing gesture is started and not pinching, begin on first move
+        if (
+            !(gesture && gesture.pinch && gesture.pinch.active) &&
+            !(gesture && gesture.start)
+        ) {
             beginToolGesture(pw, e.pointerId);
         }
         if (DEBUG_DRAW_INPUT) inputDebugPoints.push({ x: sp.x, y: sp.y });
@@ -688,20 +691,46 @@ dom.stage.addEventListener('pointerup', e => {
     if (gesture && gesture.pinch && gesture.pinch.active && screenPointers.size < 2) {
         gesture.pinch.active = false;
     }
-    if (!isPointerDown && !(gesture && gesture.pinch && gesture.pinch.active)) {
+    // Only finalize if a drawing gesture actually started (avoid stray strokes after pinch)
+    const hasActiveDrawing = !!(gesture && gesture.start);
+    if (!isPointerDown && !(gesture && gesture.pinch && gesture.pinch.active) && hasActiveDrawing) {
         finalizeToolGesture(p);
     }
     dom.stage.releasePointerCapture(e.pointerId);
     if (activePointers.size === 0) nExtra = DEFAULT_N_EXTRA;
+    // If no active pointers and no pinch, clear stale non-drawing gesture containers
+    if (!isPointerDown && !(gesture && gesture.pinch && gesture.pinch.active) && !(gesture && gesture.start)) {
+        gesture = null;
+    }
 });
 
-dom.stage.addEventListener('pointerleave', () => {
-    if (isPointerDown) {
-        isPointerDown = false;
-        finalizeToolGesture(lastPoint);
-        activePointers.clear();
-        screenPointers.clear();
-        if (gesture && gesture.pinch) gesture.pinch.active = false;
+dom.stage.addEventListener('pointerleave', e => {
+    if (!e) return;
+    e.preventDefault();
+    // Mirror pointerup behavior to avoid committing strokes during pinch/zoom
+    const p = getWorldPoint(e);
+    activePointers.delete(e.pointerId);
+    screenPointers.delete(e.pointerId);
+    isPointerDown = activePointers.size > 0;
+    if (gesture && gesture.panning) {
+        gesture.panning = false;
+        gesture.panLast = null;
+    }
+    if (gesture && gesture.pinch && gesture.pinch.active && screenPointers.size < 2) {
+        gesture.pinch.active = false;
+    }
+    // Only finalize if a drawing gesture actually started and no pinch is active
+    const hasActiveDrawing = !!(gesture && gesture.start);
+    if (!isPointerDown && !(gesture && gesture.pinch && gesture.pinch.active) && hasActiveDrawing) {
+        finalizeToolGesture(p);
+    }
+    try {
+        dom.stage.releasePointerCapture(e.pointerId);
+    } catch {}
+    if (activePointers.size === 0) nExtra = DEFAULT_N_EXTRA;
+    // Clear stale non-drawing gesture if nothing remains active
+    if (!isPointerDown && !(gesture && gesture.pinch && gesture.pinch.active) && !(gesture && gesture.start)) {
+        gesture = null;
     }
 });
 
@@ -778,6 +807,10 @@ function beginToolGesture(p, pointerId) {
     if (!CanvasKit || !skSurface) return;
     // Avoid starting a drawing gesture during pinch on touch
     if (gesture && gesture.pinch && gesture.pinch.active) return;
+    // Reset when starting a new drawing gesture
+    if (gesture && gesture.start) {
+        gesture = null;
+    }
     gesture = { start: p, last: p, pointerId, points: [p] };
     if (state.currentTool === 'shape') {
         clearOverlay();
@@ -947,6 +980,13 @@ function drawToolStroke(p) {
 
 function finalizeToolGesture(p) {
     if (!CanvasKit || !worldSurface) return;
+    // If no drawing gesture started (e.g., pinch or pan), do nothing
+    if (!(gesture && gesture.start) && (state.currentTool === 'pen' || state.currentTool === 'eraser' || state.currentTool === 'shape')) {
+        gesture = null;
+        clearOverlay();
+        present();
+        return;
+    }
     if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
         // Final catch-up: advance the smoother one more integration window using current velocity/acceleration
         const canvas = worldSurface.getCanvas();

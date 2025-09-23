@@ -25,7 +25,7 @@ const state = {
         color: [0, 0, 0, 1],
     },
     fill: {
-        tolerance: 200, // 0..255 color distance threshold
+        tolerance: 160, // 0..255 color distance threshold
     },
     selection: null, // { path: SkPath, points: [{x,y}], bounds: {x,y,w,h}, image: SkImage, offset:{x,y}, transform:{tx,ty,scale,rotation} }
 };

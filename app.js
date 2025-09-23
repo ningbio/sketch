@@ -337,6 +337,7 @@ function floodFillAt(x, y) {
         return dr <= tol && dg <= tol && db <= tol;
     }
 
+    let touchesEdge = false;
     while (qh < qt) {
         const pos = queue[qh++];
         const px = pos % width;
@@ -347,6 +348,10 @@ function floodFillAt(x, y) {
         overlay[off + 1] = fg;
         overlay[off + 2] = fb;
         overlay[off + 3] = fa;
+        // Track if region touches any canvas boundary
+        if (px === 0 || px === width - 1 || py === 0 || py === height - 1) {
+            touchesEdge = true;
+        }
         // 4-neighborhood
         // left
         if (px > 0) {
@@ -383,6 +388,10 @@ function floodFillAt(x, y) {
         // diagonals removed for 4-connected fill
     }
 
+    // If region touches canvas boundary, skip filling to avoid leaking
+    if (touchesEdge) {
+        return;
+    }
     // Create image from overlay and composite onto world surface
     const overlayImg = CanvasKit.MakeImage(
         {

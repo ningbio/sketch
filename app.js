@@ -24,6 +24,9 @@ const state = {
         strokeWidth: 2,
         color: [0, 0, 0, 1],
     },
+    fill: {
+        tolerance: 200, // 0..255 color distance threshold
+    },
     selection: null, // { path: SkPath, points: [{x,y}], bounds: {x,y,w,h}, image: SkImage, offset:{x,y}, transform:{tx,ty,scale,rotation} }
 };
 
@@ -78,6 +81,9 @@ const dom = {
     pressureMinVal: document.getElementById('pressure-min-val'),
     pressureMax: document.getElementById('pressure-max'),
     pressureMaxVal: document.getElementById('pressure-max-val'),
+    fillProps: document.getElementById('fill-props'),
+    fillTolerance: document.getElementById('fill-tolerance'),
+    fillToleranceVal: document.getElementById('fill-tolerance-val'),
 };
 
 // Add after DOM bindings
@@ -149,6 +155,18 @@ if (dom.pressureMin && dom.pressureMinVal && dom.pressureMax && dom.pressureMaxV
             dom.pressureMinVal.textContent = PEN_PRESSURE_MIN_SCALE.toFixed(2) + '×';
         }
         dom.pressureMaxVal.textContent = PEN_PRESSURE_MAX_SCALE.toFixed(2) + '×';
+    });
+}
+
+// Fill tolerance binding
+if (dom.fillTolerance && dom.fillToleranceVal) {
+    const v = Math.max(0, Math.min(255, Number(dom.fillTolerance.value)));
+    state.fill.tolerance = v;
+    dom.fillToleranceVal.textContent = String(v);
+    dom.fillTolerance.addEventListener('input', () => {
+        const t = Math.max(0, Math.min(255, Number(dom.fillTolerance.value)));
+        state.fill.tolerance = t;
+        dom.fillToleranceVal.textContent = String(t);
     });
 }
 
@@ -243,6 +261,179 @@ function drawFilledLine(canvas, x0, y0, x1, y1, width, paint) {
     path.close();
     canvas.drawPath(path, paint);
     path.delete();
+}
+
+// Flood fill utility: fills a contiguous region in the composited scene and applies it to worldSurface
+function floodFillAt(x, y) {
+    if (!CanvasKit || !worldSurface) return;
+    const width = Math.max(1, worldSize.width || 0);
+    const height = Math.max(1, worldSize.height || 0);
+    const ix = Math.max(0, Math.min(width - 1, Math.floor(x)));
+    const iy = Math.max(0, Math.min(height - 1, Math.floor(y)));
+    // Build a composited CPU surface: white background + world image
+    const comp = CanvasKit.MakeSurface(width, height);
+    if (!comp) return;
+    const cc = comp.getCanvas();
+    // White background
+    cc.clear(CanvasKit.Color(255, 255, 255, 255));
+    // Draw world snapshot on top
+    const worldImg = worldSurface.makeImageSnapshot();
+    if (worldImg) {
+        cc.drawImage(worldImg, 0, 0);
+    }
+    // Read pixels (RGBA_8888, Unpremul)
+    const pixels = cc.readPixels(0, 0, {
+        width,
+        height,
+        colorType: CanvasKit.ColorType.RGBA_8888,
+        alphaType: CanvasKit.AlphaType.Unpremul,
+        colorSpace: CanvasKit.ColorSpace.SRGB,
+    });
+    // Cleanup temp resources
+    if (worldImg) worldImg.delete();
+    comp.dispose();
+    if (!pixels) return;
+
+    const idx = (iy * width + ix) * 4;
+    const sr = pixels[idx + 0],
+        sg = pixels[idx + 1],
+        sb = pixels[idx + 2],
+        sa = pixels[idx + 3];
+    // If clicking outside the canvas or data missing
+    if (sr == null) return;
+
+    // Prepare fill color from state.pen.color and opacity
+    const pc = state.pen.color || [0, 0, 0, 1];
+    const fr = Math.max(0, Math.min(255, Math.round((pc[0] || 0) * 255)));
+    const fg = Math.max(0, Math.min(255, Math.round((pc[1] || 0) * 255)));
+    const fb = Math.max(0, Math.min(255, Math.round((pc[2] || 0) * 255)));
+    const pa = pc[3] == null ? 1 : pc[3];
+    const fa = Math.max(0, Math.min(255, Math.round(pa * (state.pen.opacity || 1) * 255)));
+
+    // Tolerance setup (0..255), RGB-only per-channel tolerance
+    const tol = Math.max(0, Math.min(255, (state.fill && state.fill.tolerance) || 0));
+    // Early exit if seed already close to fill color (RGB only)
+    if (Math.abs(sr - fr) <= tol && Math.abs(sg - fg) <= tol && Math.abs(sb - fb) <= tol) {
+        return;
+    }
+
+    const visited = new Uint8Array(width * height);
+    const queue = new Int32Array(width * height);
+    let qh = 0,
+        qt = 0;
+    const seedPos = iy * width + ix;
+    queue[qt++] = seedPos;
+    visited[seedPos] = 1;
+
+    // Output overlay with transparent everywhere except filled region
+    const overlay = new Uint8Array(width * height * 4);
+
+    // Tolerant match predicate (RGB only)
+    function matches(pos) {
+        const o = pos * 4;
+        const dr = Math.abs(pixels[o] - sr);
+        const dg = Math.abs(pixels[o + 1] - sg);
+        const db = Math.abs(pixels[o + 2] - sb);
+        return dr <= tol && dg <= tol && db <= tol;
+    }
+
+    while (qh < qt) {
+        const pos = queue[qh++];
+        const px = pos % width;
+        const py = (pos / width) | 0;
+        const off = pos * 4;
+        // Set overlay pixel to fill color
+        overlay[off + 0] = fr;
+        overlay[off + 1] = fg;
+        overlay[off + 2] = fb;
+        overlay[off + 3] = fa;
+        // 4-neighborhood
+        // left
+        if (px > 0) {
+            const np = pos - 1;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+        // right
+        if (px < width - 1) {
+            const np = pos + 1;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+        // up
+        if (py > 0) {
+            const np = pos - width;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+        // down
+        if (py < height - 1) {
+            const np = pos + width;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+        // 8-connected diagonals to catch AA boundary pixels
+        if (px > 0 && py > 0) {
+            const np = pos - width - 1;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+        if (px < width - 1 && py > 0) {
+            const np = pos - width + 1;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+        if (px > 0 && py < height - 1) {
+            const np = pos + width - 1;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+        if (px < width - 1 && py < height - 1) {
+            const np = pos + width + 1;
+            if (!visited[np] && matches(np)) {
+                visited[np] = 1;
+                queue[qt++] = np;
+            }
+        }
+    }
+
+    // Create image from overlay and composite onto world surface
+    const overlayImg = CanvasKit.MakeImage(
+        {
+            width,
+            height,
+            alphaType: CanvasKit.AlphaType.Unpremul,
+            colorType: CanvasKit.ColorType.RGBA_8888,
+            colorSpace: CanvasKit.ColorSpace.SRGB,
+        },
+        overlay,
+        width * 4
+    );
+    if (overlayImg) {
+        const c = worldSurface.getCanvas();
+        const paint = new CanvasKit.Paint();
+        paint.setAntiAlias(true);
+        paint.setBlendMode(CanvasKit.BlendMode.SrcOver);
+        c.drawImage(overlayImg, 0, 0, paint);
+        paint.delete();
+        overlayImg.delete();
+        worldSurface.flush && worldSurface.flush();
+        present();
+    }
 }
 
 function setCanvasSize(canvas) {
@@ -401,11 +592,16 @@ function present() {
 function updateToolVisibility() {
     const showPen = state.currentTool === 'pen' || state.currentTool === 'eraser';
     const showShape = state.currentTool === 'shape';
+    const showFill = state.currentTool === 'fill';
     // Set both hidden attribute and inline display to avoid any CSS conflicts
     dom.penProps.hidden = !showPen;
     dom.penProps.style.display = showPen ? '' : 'none';
     dom.shapeProps.hidden = !showShape;
     dom.shapeProps.style.display = showShape ? '' : 'none';
+    if (dom.fillProps) {
+        dom.fillProps.hidden = !showFill;
+        dom.fillProps.style.display = showFill ? '' : 'none';
+    }
     // Only show shape stroke width when shape type is line and Shape tool active
     const sg = document.getElementById('shape-stroke-width-group');
     if (sg) {
@@ -815,6 +1011,13 @@ function beginToolGesture(p, pointerId) {
         // start lasso
         clearOverlay();
         gesture.points = [p];
+    } else if (state.currentTool === 'fill') {
+        // Perform flood-fill at clicked world coordinate
+        clearOverlay();
+        floodFillAt(p.x, p.y);
+        // Do not start a continuous gesture for fill
+        gesture = null;
+        return;
     } else if (state.currentTool === 'pen' || state.currentTool === 'eraser') {
         // Stamp initial brush immediately on down
         const paint = new CanvasKit.Paint();

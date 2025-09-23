@@ -14,6 +14,7 @@
                     <button class="tool-btn" data-tool="pen" aria-pressed="true">Pen</button>
                     <button class="tool-btn" data-tool="eraser">Eraser</button>
                     <button class="tool-btn" data-tool="shape">Shape</button>
+                    <button class="tool-btn" data-tool="fill">Fill</button>
                     <button class="tool-btn" data-tool="select">Select</button>
                     <button class="tool-btn" data-tool="transform">Transform</button>
                     <button class="tool-btn" id="clear-btn">Clear</button>
@@ -81,6 +82,13 @@
                         Size
                         <input id="shape-stroke-width" type="range" min="1" max="200" value="2" />
                         <span id="shape-stroke-width-val">2</span>
+                    </label>
+                </div>
+                <div class="tool-props" id="fill-props" hidden>
+                    <label>
+                        Tolerance
+                        <input id="fill-tolerance" type="range" min="0" max="255" step="1" value="200" />
+                        <span id="fill-tolerance-val">200</span>
                     </label>
                 </div>
             </header>

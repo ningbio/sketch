@@ -380,35 +380,7 @@ function floodFillAt(x, y) {
                 queue[qt++] = np;
             }
         }
-        // 8-connected diagonals to catch AA boundary pixels
-        if (px > 0 && py > 0) {
-            const np = pos - width - 1;
-            if (!visited[np] && matches(np)) {
-                visited[np] = 1;
-                queue[qt++] = np;
-            }
-        }
-        if (px < width - 1 && py > 0) {
-            const np = pos - width + 1;
-            if (!visited[np] && matches(np)) {
-                visited[np] = 1;
-                queue[qt++] = np;
-            }
-        }
-        if (px > 0 && py < height - 1) {
-            const np = pos + width - 1;
-            if (!visited[np] && matches(np)) {
-                visited[np] = 1;
-                queue[qt++] = np;
-            }
-        }
-        if (px < width - 1 && py < height - 1) {
-            const np = pos + width + 1;
-            if (!visited[np] && matches(np)) {
-                visited[np] = 1;
-                queue[qt++] = np;
-            }
-        }
+        // diagonals removed for 4-connected fill
     }
 
     // Create image from overlay and composite onto world surface

@@ -660,7 +660,7 @@ dom.shapeType.addEventListener('change', () => {
 dom.opacity.addEventListener('input', () => {
     const v = Math.max(10, Math.min(100, Number(dom.opacity.value)));
     state.pen.opacity = v / 1000; // compensate tight stamping overlapping
-    state.eraser.opacity = v / 1000;
+    state.eraser.opacity = v / 100; // eraser needs higher opacity for complete erasure
     dom.opacityVal.textContent = `${v}%`;
     if (lastHoverScreenPoint && (state.currentTool === 'pen' || state.currentTool === 'eraser')) {
         previewMove(lastHoverScreenPoint);
@@ -1005,7 +1005,7 @@ function beginToolGesture(p, pointerId) {
         paint.setAntiAlias(true);
         paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.DstOut : CanvasKit.BlendMode.SrcOver);
         paint.setColor(CanvasKit.Color(0, 0, 0, 255));
-        paint.setAlphaf(state.pen.opacity);
+        paint.setAlphaf(state.currentTool === 'eraser' ? state.eraser.opacity : state.pen.opacity);
         paint.setStyle(CanvasKit.PaintStyle.Fill);
         const c = worldSurface.getCanvas();
 
@@ -1053,7 +1053,7 @@ function drawToolStroke(p) {
         paint.setAntiAlias(true);
         paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.DstOut : CanvasKit.BlendMode.SrcOver);
         paint.setColor(CanvasKit.Color(0, 0, 0, 255));
-        paint.setAlphaf(state.pen.opacity);
+        paint.setAlphaf(state.currentTool === 'eraser' ? state.eraser.opacity : state.pen.opacity);
         paint.setStyle(CanvasKit.PaintStyle.Fill);
         const canvas = worldSurface.getCanvas();
 
@@ -1175,7 +1175,7 @@ function finalizeToolGesture(p) {
         paint.setAntiAlias(true);
         paint.setBlendMode(state.currentTool === 'eraser' ? CanvasKit.BlendMode.DstOut : CanvasKit.BlendMode.SrcOver);
         paint.setColor(CanvasKit.Color(0, 0, 0, 255));
-        paint.setAlphaf(state.pen.opacity);
+        paint.setAlphaf(state.currentTool === 'eraser' ? state.eraser.opacity : state.pen.opacity);
         paint.setStyle(CanvasKit.PaintStyle.Fill);
 
         // Use the last raw point as the target for the integrator, but don't linearly snap to it
